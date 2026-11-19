@@ -37,7 +37,7 @@ interface SyncOperationDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun enqueue(operation: SyncOperationEntity): Long
 
-    @Query("SELECT * FROM sync_operations WHERE state = 'PENDING' AND nextAttemptAtEpochMillis <= :now ORDER BY createdAtEpochMillis LIMIT :limit")
+    @Query("SELECT * FROM sync_operations WHERE state = 'PENDING' AND nextAttemptAtEpochMillis <= :now ORDER BY createdAtEpochMillis, rowid LIMIT :limit")
     suspend fun due(now: Long = System.currentTimeMillis(), limit: Int = 50): List<SyncOperationEntity>
 
     @Query("SELECT COUNT(*) FROM sync_operations WHERE state = 'PENDING'")
@@ -55,7 +55,7 @@ interface SyncOperationDao {
     @Query("SELECT * FROM sync_operations WHERE idempotencyKey = :key LIMIT 1")
     suspend fun findByIdempotencyKey(key: String): SyncOperationEntity?
 
-    @Query("SELECT * FROM sync_operations WHERE entityType = :type AND entityId = :entityId AND state = 'PENDING' LIMIT 1")
+    @Query("SELECT * FROM sync_operations WHERE entityType = :type AND entityId = :entityId AND state = 'PENDING' ORDER BY createdAtEpochMillis DESC LIMIT 1")
     suspend fun pendingForEntity(type: String, entityId: String): SyncOperationEntity?
 
     @Query("SELECT * FROM sync_operations WHERE entityType = :type AND entityId = :entityId AND state = 'CONFLICT' ORDER BY createdAtEpochMillis DESC LIMIT 1")
