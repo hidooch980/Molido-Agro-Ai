@@ -47,7 +47,15 @@ private fun AgroApp() {
     val context = LocalContext.current
     val db = remember(context) { AgroDatabaseProvider.get(context) }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { SyncScheduler.schedule(context) }
+    var authRevision by remember { mutableIntStateOf(0) }
+    var currentUser by remember { mutableStateOf(SessionStore(context).userId()) }
+    var boundAccount by remember { mutableStateOf<String?>(null) }
+    var accountStateLoaded by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        SyncScheduler.schedule(context)
+        boundAccount = db.appMetadataDao().value("bound_account_id")
+        accountStateLoaded = true
+    }
     val greenhouses by db.greenhouseDao().observeAll().collectAsState(initial = emptyList())
     val cycles by db.cropCycleDao().observeAll().collectAsState(initial = emptyList())
     val activities by db.farmActivityDao().observeRecent().collectAsState(initial = emptyList())
@@ -71,9 +79,18 @@ private fun AgroApp() {
                 Text(notice, color = Color(0xFF9BE0B1), style = MaterialTheme.typography.bodySmall)
             }
             UpdateCheckerCard()
-            AuthPanel(context)
-            SyncInboxPanel(context, db)
-            when (tab) {
+            AuthPanel(context) {
+                authRevision += 1
+                currentUser = SessionStore(context).userId()
+                boundAccount = db.appMetadataDao().value("bound_account_id")
+            }
+            if (!accountStateLoaded) {
+                PanelCard("در حال بررسی وضعیت امنیت حساب...")
+            } else if (boundAccount != null && currentUser == null) {
+                PanelCard("اطلاعات این دستگاه به حساب دیگری متصل است. برای مشاهده اطلاعات خصوصی، با همان حساب وارد شوید.")
+            } else {
+                SyncInboxPanel(context, db)
+                when (tab) {
                 Tab.HOME -> HomePage(greenhouses.size, cycles.count { it.status == "ACTIVE" }, activities.size, stock.size, balance, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
                 Tab.GREENHOUSE -> GreenhousePage(greenhouses, onSave = { n, a, l ->
                     scope.launch { try { val id = UUID.randomUUID().toString(); val item = GreenhouseEntity(id, n.trim(), a, l.trim()); val payload = JSONObject().put("id", id).put("name", item.name).put("areaSquareMeters", a).put("location", item.location).put("cultivationMethod", item.cultivationMethod).toString(); db.insertAndEnqueue(context, "greenhouse", id, payload) { db.greenhouseDao().insert(item) }; notice = "گلخانه ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت ناموفق؛ نام گلخانه باید یکتا باشد." } }
@@ -90,6 +107,8 @@ private fun AgroApp() {
                 Tab.MONEY -> FinancePage(finance, balance, onSave = { type, cat, amount, desc ->
                     scope.launch { try { val id = UUID.randomUUID().toString(); val item = FinancialEntryEntity(id, null, type, cat, amount, description = desc); val payload = JSONObject().put("id", id).put("type", type).put("category", cat).put("amount", amount).put("currency", item.currency).put("occurredAtEpochMillis", item.occurredAtEpochMillis).put("description", desc).toString(); db.insertAndEnqueue(context, "financial_entry", id, payload) { db.financeDao().insert(item) }; notice = "سند مالی ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت سند مالی ناموفق بود." } }
                 })
+            }
+                }
             }
         }
     }
@@ -120,7 +139,7 @@ private fun SyncInboxPanel(context: android.content.Context, db: AgroDatabase) {
 }
 
 @Composable
-private fun AuthPanel(context: android.content.Context) {
+private fun AuthPanel(context: android.content.Context, onAuthChanged: () -> Unit) {
     val scope = rememberCoroutineScope()
     val session = remember(context) { SessionStore(context) }
     var user by remember { mutableStateOf("") }
@@ -139,6 +158,7 @@ private fun AuthPanel(context: android.content.Context) {
                         withContext(Dispatchers.IO) { AuthRepository(context).login(user.trim(), password) }
                         status = "ورود موفق؛ همگام‌سازی زمان‌بندی شد."
                         password = ""
+                        onAuthChanged()
                     } catch (e: Exception) { status = e.message ?: "ورود ناموفق بود." }
                     busy = false
                 }
@@ -150,12 +170,13 @@ private fun AuthPanel(context: android.content.Context) {
                         withContext(Dispatchers.IO) { AuthRepository(context).register(user.trim(), password) }
                         status = "حساب ساخته شد و ورود انجام شد."
                         password = ""
+                        onAuthChanged()
                     } catch (e: Exception) { status = e.message ?: "ثبت‌نام ناموفق بود." }
                     busy = false
                 }
             }) { Text("ساخت حساب") }
             if (session.userId() != null) {
-                TextButton(onClick = { AuthRepository(context).signOut(); status = "از حساب خارج شدید." }) { Text("خروج") }
+                TextButton(onClick = { AuthRepository(context).signOut(); status = "از حساب خارج شدید."; onAuthChanged() }) { Text("خروج") }
             }
         }
     }
