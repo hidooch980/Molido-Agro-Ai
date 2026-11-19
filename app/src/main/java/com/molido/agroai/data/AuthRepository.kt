@@ -34,7 +34,9 @@ class AuthRepository(context: Context) {
             val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (code !in 200..299) throw IllegalStateException(JSONObject(response).optString("detail", "ورود ناموفق بود."))
             val json = JSONObject(response)
-            session.saveSession(json.getString("accessToken"), json.getString("userId"))
+            val userId = json.getString("userId")
+            AgroDatabaseProvider.get(appContext).bindToAccount(userId)
+            session.saveSession(json.getString("accessToken"), userId)
             SyncScheduler.runNow(appContext)
         } finally { connection.disconnect() }
     }
