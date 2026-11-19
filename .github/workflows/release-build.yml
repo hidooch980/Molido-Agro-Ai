@@ -1,16 +1,16 @@
 name: Android Release Build
 
-"on":
+on:
   push:
-    # main is intentionally excluded until the Android source is merged there.
     branches: [foundation/android-release-foundation]
     tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
 
+# Build and PR code receive read-only repository permissions.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: android-release-${{ github.ref }}
@@ -134,9 +134,31 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Create update manifest
-        if: startsWith(github.ref, 'refs/tags/v')
+  publish-release:
+    name: Publish signed release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: assemble-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download verified APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: molido-agro-ai-apk-${{ github.run_number }}
+          path: dist
+
+      - name: Require signed APK artifact
         shell: bash
+        run: |
+          set -euo pipefail
+          test -s dist/molido-agro-ai.apk
+          test ! -e dist/molido-agro-ai-unsigned.apk
+
+      - name: Create update manifest
+        shell: bash
+        working-directory: dist
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
@@ -156,10 +178,9 @@ jobs:
           PY
 
       - name: Publish signed GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            molido-agro-ai.apk
-            latest.json
+            dist/molido-agro-ai.apk
+            dist/latest.json
           generate_release_notes: true
