@@ -1,6 +1,6 @@
 package com.molido.agroai.data
 
-import androidx.room.withTransaction
+import android.content.Context\nimport androidx.room.withTransaction
 import java.util.UUID
 
 object SyncRetryPolicy {
@@ -31,7 +31,7 @@ class SyncOutboxRepository(private val dao: SyncOperationDao) {
             entityType = entityType,
             entityId = entityId,
             operation = operation,
-            payloadJson = payloadJson,
+            payloadJson = SyncPayloadCipher.encrypt(context, payloadJson),
             createdAtEpochMillis = now,
             nextAttemptAtEpochMillis = now
         )
