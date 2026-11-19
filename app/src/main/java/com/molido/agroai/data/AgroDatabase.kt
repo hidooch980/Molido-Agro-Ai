@@ -12,9 +12,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CropCycleEntity::class,
         FarmActivityEntity::class,
         InventoryItemEntity::class,
-        FinancialEntryEntity::class
+        FinancialEntryEntity::class,
+        SyncOperationEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AgroDatabase : RoomDatabase() {
@@ -26,6 +27,15 @@ abstract class AgroDatabase : RoomDatabase() {
     abstract fun financeDao(): FinanceDao
 
     companion object {
+
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS sync_operations (id TEXT NOT NULL, idempotencyKey TEXT NOT NULL, entityType TEXT NOT NULL, entityId TEXT NOT NULL, operation TEXT NOT NULL, payloadJson TEXT NOT NULL, state TEXT NOT NULL, attemptCount INTEGER NOT NULL, createdAtEpochMillis INTEGER NOT NULL, nextAttemptAtEpochMillis INTEGER NOT NULL, lastError TEXT, PRIMARY KEY(id))")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_sync_operations_idempotencyKey ON sync_operations(idempotencyKey)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_operations_state_nextAttemptAtEpochMillis ON sync_operations(state, nextAttemptAtEpochMillis)")
+            }
+        }
+
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("CREATE TABLE IF NOT EXISTS greenhouses (id TEXT NOT NULL, name TEXT NOT NULL, areaSquareMeters REAL NOT NULL, location TEXT NOT NULL, cultivationMethod TEXT NOT NULL, createdAtEpochMillis INTEGER NOT NULL, isActive INTEGER NOT NULL, PRIMARY KEY(id))")
