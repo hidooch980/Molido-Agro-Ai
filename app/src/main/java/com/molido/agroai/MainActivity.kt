@@ -41,7 +41,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AgroApp() {
-    val db = remember { AgroDatabaseProvider.get(LocalContext.current) }
+    val context = LocalContext.current
+    val db = remember(context) { AgroDatabaseProvider.get(context) }
     val scope = rememberCoroutineScope()
     val greenhouses by db.greenhouseDao().observeAll().collectAsState(initial = emptyList())
     val cycles by db.cropCycleDao().observeAll().collectAsState(initial = emptyList())
