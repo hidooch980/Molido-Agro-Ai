@@ -68,7 +68,7 @@ private fun AgroApp() {
             }
             UpdateCheckerCard()
             when (tab) {
-                Tab.HOME -> HomePage(greenhouses.size, cycles.count { it.status == "ACTIVE" }, activities.size, stock.size, balance)
+                Tab.HOME -> HomePage(greenhouses.size, cycles.count { it.status == "ACTIVE" }, activities.size, stock.size, balance, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
                 Tab.GREENHOUSE -> GreenhousePage(greenhouses, onSave = { n, a, l ->
                     scope.launch { try { db.greenhouseDao().insert(GreenhouseEntity(UUID.randomUUID().toString(), n.trim(), a, l.trim())); notice = "گلخانه ثبت شد." } catch (_: Exception) { notice = "ثبت ناموفق؛ نام گلخانه باید یکتا باشد." } }
                 })
@@ -119,9 +119,13 @@ private fun Metric(title: String, value: String, modifier: Modifier = Modifier) 
 }
 
 @Composable
-private fun HomePage(g: Int, c: Int, a: Int, s: Int, balance: Double) {
+private fun HomePage(g: Int, c: Int, a: Int, s: Int, balance: Double, versionName: String, versionCode: Int) {
     Page {
         PanelCard("به مولیدو آگرو خوش آمدید\nاطلاعات مزرعه ابتدا روی دستگاه شما ذخیره می‌شود و بدون اینترنت در دسترس است.")
+        Heading("اطلاعات نسخه")
+        PanelCard("نسخه برنامه: $versionName\nشماره ساخت: $versionCode\nبه‌روزرسانی: بررسی خودکار هنگام بازشدن برنامه؛ نصب نهایی با تأیید شما")
+        Heading("اطلاعات عمومی برنامه")
+        PanelCard("مولیدو آگرو؛ سامانه مدیریت کشاورزی و گلخانه برای محصولات خوراکی و زراعی. دامنه محصولات شامل خیار، گوجه‌فرنگی، بادمجان، انواع فلفل، توت‌فرنگی، سبزیجات و سایر محصولات قابل کشت است. گل‌ها و گیاهان زینتی در دامنه محصول قرار ندارند.")
         Heading("نمای کلی")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Metric("گلخانه‌ها", g.toString(), Modifier.weight(1f)); Metric("دوره‌های فعال کشت", c.toString(), Modifier.weight(1f)) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Metric("سوابق عملیات", a.toString(), Modifier.weight(1f)); Metric("اقلام انبار", s.toString(), Modifier.weight(1f)) }
