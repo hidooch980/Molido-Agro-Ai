@@ -21,6 +21,8 @@ class AuthRepository(context: Context) {
         require(base.startsWith("https://")) { "آدرس امن سرور همگام‌سازی تنظیم نشده است." }
         val connection = (URL("$base/v1/auth/$action").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
+            instanceFollowRedirects = false
+            useCaches = false
             connectTimeout = 15_000
             readTimeout = 20_000
             doOutput = true
