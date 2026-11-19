@@ -82,7 +82,7 @@ private fun AgroApp() {
             AuthPanel(context) {
                 authRevision += 1
                 currentUser = SessionStore(context).userId()
-                boundAccount = db.appMetadataDao().value("bound_account_id")
+                scope.launch { boundAccount = db.appMetadataDao().value("bound_account_id") }
             }
             if (!accountStateLoaded) {
                 PanelCard("در حال بررسی وضعیت امنیت حساب...")
