@@ -3,6 +3,9 @@ package com.molido.agroai
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,11 +24,54 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 
 private const val MAX_UPDATE_BYTES = 100L * 1024L * 1024L
+private const val MAX_MANIFEST_BYTES = 16 * 1024
+private val TRUSTED_DOWNLOAD_HOSTS = setOf("github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com")
+
+private fun requireTrustedHttps(connection: HttpURLConnection) {
+    require(connection.url.protocol.equals("https", ignoreCase = true)) { "HTTPS is required" }
+    require(connection.url.host.lowercase() in TRUSTED_DOWNLOAD_HOSTS) { "Untrusted update redirect host" }
+}
+
+private fun readLimited(input: java.io.InputStream, maxBytes: Int): ByteArray {
+    val output = ByteArrayOutputStream()
+    val buffer = ByteArray(4096)
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        require(output.size() + count <= maxBytes) { "Manifest exceeds size limit" }
+        output.write(buffer, 0, count)
+    }
+    return output.toByteArray()
+}
+
+private fun signatureDigests(packageInfo: PackageInfo): Set<String> {
+    val signatures = if (Build.VERSION.SDK_INT >= 28) {
+        packageInfo.signingInfo?.apkContentsSigners?.toList().orEmpty()
+    } else {
+        @Suppress("DEPRECATION")
+        packageInfo.signatures?.toList().orEmpty()
+    }
+    return signatures.map { signature ->
+        MessageDigest.getInstance("SHA-256").digest(signature.toByteArray()).joinToString("") { "%02x".format(it) }
+    }.toSet()
+}
+
+private fun matchesInstalledSigner(context: android.content.Context, apk: File): Boolean {
+    val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
+    @Suppress("DEPRECATION")
+    val installed = context.packageManager.getPackageInfo(context.packageName, flags)
+    val candidate = context.packageManager.getPackageArchiveInfo(apk.absolutePath, flags) ?: return false
+    if (candidate.packageName != context.packageName) return false
+    val installedDigests = signatureDigests(installed)
+    val candidateDigests = signatureDigests(candidate)
+    return installedDigests.isNotEmpty() && installedDigests == candidateDigests
+}
 
 private data class AvailableUpdate(val versionName: String, val versionCode: Int, val apkFile: String, val sha256: String)
 
@@ -46,7 +92,9 @@ fun UpdateCheckerCard() {
                 connection.readTimeout = 8000
                 try {
                     check(connection.responseCode == 200)
-                    val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    requireTrustedHttps(connection)
+                    val manifestBytes = connection.inputStream.use { readLimited(it, MAX_MANIFEST_BYTES) }
+                    val json = JSONObject(manifestBytes.toString(Charsets.UTF_8))
                     AvailableUpdate(json.getString("versionName"), json.getInt("versionCode"), json.getString("apkFile"), json.getString("sha256").lowercase()).also { candidate ->
                         require(candidate.versionCode > 0)
                         require(candidate.versionName.isNotBlank() && candidate.versionName.length <= 64)
@@ -83,6 +131,7 @@ fun UpdateCheckerCard() {
                                 connection.instanceFollowRedirects = true
                                 try {
                                     check(connection.responseCode == 200)
+                                    requireTrustedHttps(connection)
                                     val declaredLength = connection.contentLengthLong
                                     require(declaredLength in 1..MAX_UPDATE_BYTES) { "invalid APK size" }
                                     val dir = File(context.cacheDir, "updates").apply { mkdirs() }
@@ -102,6 +151,7 @@ fun UpdateCheckerCard() {
                                             }
                                         } }
                                         require(total == declaredLength) { "incomplete APK download" }
+                                        require(matchesInstalledSigner(context, file)) { "APK signer does not match installed application" }
                                         val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
                                         check(actualHash == candidate.sha256) { "checksum mismatch" }
                                         file
@@ -114,7 +164,7 @@ fun UpdateCheckerCard() {
                         }
                         result.onSuccess {
                             downloaded = it
-                            status = "دریافت کامل و صحت SHA-256 تأیید شد."
+                            status = "دریافت کامل، امضا و SHA-256 تأیید شدند."
                         }.onFailure { status = "دریافت ناموفق یا فایل نامعتبر است؛ دوباره تلاش کنید." }
                         busy = false
                     }
