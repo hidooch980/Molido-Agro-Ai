@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.dp
 import com.molido.agroai.data.*
 import com.molido.agroai.domain.CropCatalog
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.UUID
 
@@ -45,6 +47,7 @@ private fun AgroApp() {
     val context = LocalContext.current
     val db = remember(context) { AgroDatabaseProvider.get(context) }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { SyncScheduler.schedule(context) }
     val greenhouses by db.greenhouseDao().observeAll().collectAsState(initial = emptyList())
     val cycles by db.cropCycleDao().observeAll().collectAsState(initial = emptyList())
     val activities by db.farmActivityDao().observeRecent().collectAsState(initial = emptyList())
@@ -68,6 +71,7 @@ private fun AgroApp() {
                 Text(notice, color = Color(0xFF9BE0B1), style = MaterialTheme.typography.bodySmall)
             }
             UpdateCheckerCard()
+            AuthPanel(context)
             when (tab) {
                 Tab.HOME -> HomePage(greenhouses.size, cycles.count { it.status == "ACTIVE" }, activities.size, stock.size, balance, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
                 Tab.GREENHOUSE -> GreenhousePage(greenhouses, onSave = { n, a, l ->
@@ -85,6 +89,48 @@ private fun AgroApp() {
                 Tab.MONEY -> FinancePage(finance, balance, onSave = { type, cat, amount, desc ->
                     scope.launch { try { val id = UUID.randomUUID().toString(); val item = FinancialEntryEntity(id, null, type, cat, amount, description = desc); val payload = JSONObject().put("id", id).put("type", type).put("category", cat).put("amount", amount).put("currency", item.currency).put("occurredAtEpochMillis", item.occurredAtEpochMillis).put("description", desc).toString(); db.insertAndEnqueue(context, "financial_entry", id, payload) { db.financeDao().insert(item) }; notice = "سند مالی ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت سند مالی ناموفق بود." } }
                 })
+            }
+        }
+    }
+}
+
+@Composable
+private fun AuthPanel(context: android.content.Context) {
+    val scope = rememberCoroutineScope()
+    val session = remember(context) { SessionStore(context) }
+    var user by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf(session.userId()?.let { "حساب متصل: $it" } ?: "برای همگام‌سازی، وارد حساب شوید یا حساب بسازید.") }
+    var busy by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
+        Text(status, color = Muted, style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(user, { user = it }, label = { Text("نام کاربری") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(password, { password = it }, label = { Text("گذرواژه (حداقل ۱۲ نویسه)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(enabled = !busy, onClick = {
+                busy = true
+                scope.launch {
+                    try {
+                        withContext(Dispatchers.IO) { AuthRepository(context).login(user.trim(), password) }
+                        status = "ورود موفق؛ همگام‌سازی زمان‌بندی شد."
+                        password = ""
+                    } catch (e: Exception) { status = e.message ?: "ورود ناموفق بود." }
+                    busy = false
+                }
+            }) { Text("ورود") }
+            OutlinedButton(enabled = !busy, onClick = {
+                busy = true
+                scope.launch {
+                    try {
+                        withContext(Dispatchers.IO) { AuthRepository(context).register(user.trim(), password) }
+                        status = "حساب ساخته شد و ورود انجام شد."
+                        password = ""
+                    } catch (e: Exception) { status = e.message ?: "ثبت‌نام ناموفق بود." }
+                    busy = false
+                }
+            }) { Text("ساخت حساب") }
+            if (session.userId() != null) {
+                TextButton(onClick = { AuthRepository(context).signOut(); status = "از حساب خارج شدید." }) { Text("خروج") }
             }
         }
     }
