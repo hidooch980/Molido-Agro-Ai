@@ -50,11 +50,11 @@ private fun readLimited(input: java.io.InputStream, maxBytes: Int): ByteArray {
     return output.toByteArray()
 }
 
+@Suppress("DEPRECATION")
 private fun signatureDigests(packageInfo: PackageInfo): Set<String> {
     val signatures = if (Build.VERSION.SDK_INT >= 28) {
         packageInfo.signingInfo?.apkContentsSigners?.toList().orEmpty()
     } else {
-        @Suppress("DEPRECATION")
         packageInfo.signatures?.toList().orEmpty()
     }
     return signatures.map { signature ->
@@ -62,9 +62,9 @@ private fun signatureDigests(packageInfo: PackageInfo): Set<String> {
     }.toSet()
 }
 
+@Suppress("DEPRECATION")
 private fun matchesInstalledSigner(context: android.content.Context, apk: File): Boolean {
-    val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
-    @Suppress("DEPRECATION")
+    val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
     val installed = context.packageManager.getPackageInfo(context.packageName, flags)
     val candidate = context.packageManager.getPackageArchiveInfo(apk.absolutePath, flags) ?: return false
     if (candidate.packageName != context.packageName) return false
