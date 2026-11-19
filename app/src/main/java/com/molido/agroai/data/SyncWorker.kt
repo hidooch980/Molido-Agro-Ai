@@ -55,7 +55,20 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
                 val response = request("$base/v1/sync/push", token, body.toString())
                 val result = JSONObject(response).getJSONArray("results").getJSONObject(0)
                 when (result.optString("status")) {
-                    "applied" -> dao.markSynced(operation.id)
+                    "applied" -> {
+                        dao.markSynced(operation.id)
+                        val version = result.optInt("serverVersion", 0)
+                        if (version > 0) db.syncInboxDao().receive(SyncInboxEntity(
+                            id = "${operation.entityType}:${operation.entityId}:$version",
+                            entityType = operation.entityType,
+                            entityId = operation.entityId,
+                            encryptedPayload = operation.payloadJson,
+                            serverVersion = version,
+                            updatedAtEpochMillis = System.currentTimeMillis(),
+                            deleted = operation.operation == "DELETE",
+                            state = "SYNCED"
+                        ))
+                    }
                     "conflict" -> dao.markConflict(operation.id, "Server version conflict: ${result.optLong("serverVersion")}")
                     else -> dao.scheduleRetry(operation.id, "Unrecognized server response", SyncRetryPolicy.nextAttemptAt(System.currentTimeMillis(), operation.attemptCount))
                 }
