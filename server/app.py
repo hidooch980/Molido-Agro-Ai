@@ -1,7 +1,7 @@
 from __future__ import annotations
 import base64, hashlib, hmac, json, os, secrets, sqlite3, time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
@@ -46,8 +46,12 @@ init_db()
 
 def b64(data: bytes) -> str: return base64.urlsafe_b64encode(data).decode().rstrip("=")
 def password_hash(password: str, salt: bytes) -> bytes: return hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
+def ensure_auth_configured() -> None:
+    if len(JWT_SECRET) < 32:
+        raise HTTPException(503, "Server authentication is not configured")
+
 def token_for(user_id: str) -> str:
-    if len(JWT_SECRET) < 32: raise HTTPException(503, "Server authentication is not configured")
+    ensure_auth_configured()
     now = int(time.time())
     head = b64(b'{"alg":"HS256","typ":"JWT"}')
     body = b64(json.dumps({"sub":user_id,"iat":now,"exp":now+TOKEN_TTL}).encode())
@@ -70,7 +74,7 @@ class Credentials(BaseModel):
     password: str = Field(min_length=12,max_length=256)
 class Operation(BaseModel):
     idempotencyKey: str = Field(min_length=1,max_length=200)
-    entityType: str = Field(pattern=r"^[a-z_]{1,40}$")
+    entityType: Literal["greenhouse", "crop_cycle", "farm_activity", "inventory_item", "financial_entry"]
     entityId: str = Field(min_length=1,max_length=200)
     operation: str = Field(pattern=r"^(CREATE|UPDATE|DELETE)$")
     payload: dict[str,Any] = Field(default_factory=dict)
@@ -86,6 +90,7 @@ def health(): return {"status":"ok","service":"molido-agro-sync"}
 
 @app.post("/v1/auth/register")
 def register(body: Credentials):
+    ensure_auth_configured()
     salt=secrets.token_bytes(16); uid=secrets.token_hex(16)
     try:
         with db() as c:
@@ -95,6 +100,7 @@ def register(body: Credentials):
 
 @app.post("/v1/auth/login")
 def login(body: Credentials):
+    ensure_auth_configured()
     with db() as c: user=c.execute("SELECT * FROM users WHERE username=?",(body.username,)).fetchone()
     if not user or not hmac.compare_digest(password_hash(body.password,user["salt"]),user["password_hash"]): raise HTTPException(401,"Invalid credentials")
     return {"accessToken":token_for(user["id"]),"tokenType":"Bearer","expiresIn":TOKEN_TTL,"userId":user["id"]}
