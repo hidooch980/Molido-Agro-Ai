@@ -57,3 +57,24 @@ def test_delete_is_a_versioned_tombstone_for_other_devices(tmp_path, monkeypatch
     changes=client.post("/v1/sync/pull",json={"cursor":0},headers=headers).json()["changes"]
     assert changes[-1]["deleted"] is True
     assert changes[-1]["version"]==2
+
+def test_register_fails_before_creating_account_when_jwt_secret_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DB_PATH", tmp_path / "missing-secret.sqlite3")
+    monkeypatch.setattr(app, "JWT_SECRET", "")
+    app.init_db()
+    client = TestClient(app.app)
+    response = client.post("/v1/auth/register", json={"username": "grower_no_secret", "password": "strong-password-123"})
+    assert response.status_code == 503
+    with app.db() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
+
+
+def test_push_rejects_unsupported_entity_types(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DB_PATH", tmp_path / "entity-type.sqlite3")
+    monkeypatch.setattr(app, "JWT_SECRET", "test-secret-that-is-long-enough-for-hmac-sha256")
+    app.init_db()
+    client = TestClient(app.app)
+    token = client.post("/v1/auth/register", json={"username": "grower_entity", "password": "strong-password-123"}).json()["accessToken"]
+    operation = {"idempotencyKey": "unsupported-1", "entityType": "unknown_entity", "entityId": "x", "operation": "CREATE", "payload": {}, "baseVersion": 0}
+    response = client.post("/v1/sync/push", json={"operations": [operation]}, headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 422
