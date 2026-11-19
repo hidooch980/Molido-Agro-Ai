@@ -16,7 +16,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -34,6 +33,7 @@ fun UpdateCheckerCard() {
     var downloaded by remember { mutableStateOf<File?>(null) }
     var status by remember { mutableStateOf("بررسی نسخه جدید…") }
     var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         val result = withContext(Dispatchers.IO) {
@@ -65,7 +65,7 @@ fun UpdateCheckerCard() {
                     val candidate = update ?: return@Button
                     busy = true
                     status = "در حال دریافت و بررسی فایل…"
-                    MainScope().launch {
+                    scope.launch {
                         val result = withContext(Dispatchers.IO) {
                             runCatching {
                                 require(candidate.apkFile.matches(Regex("[A-Za-z0-9._-]+\\.apk")))
