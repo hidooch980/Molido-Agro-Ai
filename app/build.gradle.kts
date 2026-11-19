@@ -55,7 +55,9 @@ android {
 
     kotlinOptions { jvmTarget = "17" }
 
-    defaultConfig { testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }\n\n    buildFeatures {
+    defaultConfig { testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
+
+    buildFeatures {
         compose = true
         buildConfig = true
     }
@@ -85,5 +87,8 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
 
-    testImplementation("junit:junit:4.13.2")\n    androidTestImplementation("androidx.test:core:1.6.1")\n    androidTestImplementation("androidx.test.ext:junit:1.2.1")\n    androidTestImplementation("androidx.test:runner:1.6.2")
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }
