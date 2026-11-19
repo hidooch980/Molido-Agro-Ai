@@ -125,8 +125,11 @@ jobs:
           fi
           chmod 600 "$KEYSTORE"
           if ! keytool -list -keystore "$KEYSTORE" -storetype PKCS12 -storepass "$KEYSTORE_PASSWORD" > "$RUNNER_TEMP/keystore-list.txt" 2> "$RUNNER_TEMP/keystore-error.txt"; then
-            echo "::error::PKCS12 could not be opened. Check the Base64 keystore and store password."
-            tail -n 6 "$RUNNER_TEMP/keystore-error.txt"
+            echo "::error::PKCS12 could not be opened. Diagnostic output follows; no secret values are printed."
+            sed -n '1,12p' "$RUNNER_TEMP/keystore-list.txt" || true
+            sed -n '1,12p' "$RUNNER_TEMP/keystore-error.txt" || true
+            file "$KEYSTORE" || true
+            wc -c "$KEYSTORE" || true
             exit 1
           fi
           if ! grep -Fq "$KEY_ALIAS" "$RUNNER_TEMP/keystore-list.txt"; then
