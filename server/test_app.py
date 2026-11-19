@@ -43,3 +43,17 @@ def test_change_log_cursor_paginates_without_skipping_rows(tmp_path, monkeypatch
     assert len(first["changes"])==1
     assert len(second["changes"])==2
     assert first["changes"][0]["cursorId"] < second["changes"][0]["cursorId"]
+
+def test_delete_is_a_versioned_tombstone_for_other_devices(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DB_PATH", tmp_path / "delete.sqlite3"); app.init_db()
+    client=TestClient(app.app)
+    token=client.post("/v1/auth/register",json={"username":"grower_delete","password":"strong-password-987"}).json()["accessToken"]
+    headers={"Authorization":f"Bearer {token}"}
+    create={"idempotencyKey":"create-record","entityType":"inventory_item","entityId":"fertilizer-1","operation":"CREATE","payload":{"name":"Fertilizer","quantity":20},"baseVersion":0}
+    assert client.post("/v1/sync/push",json={"operations":[create]},headers=headers).json()["results"][0]["status"]=="applied"
+    delete={"idempotencyKey":"delete-record","entityType":"inventory_item","entityId":"fertilizer-1","operation":"DELETE","payload":{},"baseVersion":1}
+    result=client.post("/v1/sync/push",json={"operations":[delete]},headers=headers).json()["results"][0]
+    assert result["status"]=="applied" and result["serverVersion"]==2
+    changes=client.post("/v1/sync/pull",json={"cursor":0},headers=headers).json()["changes"]
+    assert changes[-1]["deleted"] is True
+    assert changes[-1]["version"]==2
