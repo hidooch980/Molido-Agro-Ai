@@ -10,11 +10,11 @@ class AuthRepository(context: Context) {
     private val appContext = context.applicationContext
     private val session = SessionStore(appContext)
 
-    fun register(username: String, password: String) = authenticate("register", username, password)
-    fun login(username: String, password: String) = authenticate("login", username, password)
+    suspend fun register(username: String, password: String) = authenticate("register", username, password)
+    suspend fun login(username: String, password: String) = authenticate("login", username, password)
     fun signOut() = session.clear()
 
-    private fun authenticate(action: String, username: String, password: String) {
+    private suspend fun authenticate(action: String, username: String, password: String) {
         require(username.matches(Regex("[A-Za-z0-9_.-]{3,64}")))
         require(password.length in 12..256)
         val base = BuildConfig.SYNC_BASE_URL.trim().trimEnd('/')
