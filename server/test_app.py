@@ -78,3 +78,17 @@ def test_push_rejects_unsupported_entity_types(tmp_path, monkeypatch):
     operation = {"idempotencyKey": "unsupported-1", "entityType": "unknown_entity", "entityId": "x", "operation": "CREATE", "payload": {}, "baseVersion": 0}
     response = client.post("/v1/sync/push", json={"operations": [operation]}, headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 422
+
+def test_sync_rejects_tokens_when_jwt_secret_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DB_PATH", tmp_path / "missing-jwt.sqlite3")
+    monkeypatch.setattr(app, "JWT_SECRET", "")
+    app.init_db()
+    client = TestClient(app.app)
+    response = client.post(
+        "/v1/sync/pull",
+        json={"cursor": 0},
+        headers={"Authorization": "Bearer forged.header.signature"},
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Server authentication is not configured"
+
