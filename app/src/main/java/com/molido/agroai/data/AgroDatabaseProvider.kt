@@ -13,7 +13,7 @@ object AgroDatabaseProvider {
                 context.applicationContext,
                 AgroDatabase::class.java,
                 "molido_agro_local.db"
-            ).addMigrations(AgroDatabase.MIGRATION_1_2)
+            ).addMigrations(AgroDatabase.MIGRATION_1_2, AgroDatabase.MIGRATION_2_3)
                 .build()
                 .also { instance = it }
         }
