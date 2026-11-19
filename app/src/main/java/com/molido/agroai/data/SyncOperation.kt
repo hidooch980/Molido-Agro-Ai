@@ -1,5 +1,6 @@
 package com.molido.agroai.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.Index
@@ -28,7 +29,7 @@ data class SyncOperationEntity(
     val createdAtEpochMillis: Long = System.currentTimeMillis(),
     val nextAttemptAtEpochMillis: Long = System.currentTimeMillis(),
     val lastError: String? = null,
-    val baseVersion: Int = 0
+    @ColumnInfo(defaultValue = "0") val baseVersion: Int = 0
 )
 
 @Dao
