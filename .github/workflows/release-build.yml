@@ -2,16 +2,14 @@ name: Android Release Build
 
 on:
   push:
-    branches:
-      - main
-      - foundation/android-release-foundation
+    branches: [main, foundation/android-release-foundation]
+    tags: ['v*']
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-release-${{ github.ref }}
@@ -19,9 +17,9 @@ concurrency:
 
 jobs:
   assemble-release:
-    name: Assemble Android Release
+    name: Assemble Android APK
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,7 +30,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Configure preinstalled Android SDK
+      - name: Configure Android SDK
         shell: bash
         run: |
           set -euo pipefail
@@ -44,7 +42,7 @@ jobs:
           test -x "$SDKMANAGER"
           echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
 
-      - name: Accept licenses and install SDK packages
+      - name: Install SDK packages
         shell: bash
         run: |
           set -euo pipefail
@@ -56,37 +54,88 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Verify toolchain
+      - name: Prepare signing key (when configured)
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
         shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
-          java -version
-          gradle --version
-          "$SDKMANAGER" --list_installed
-          test -d "$ANDROID_HOME/platforms/android-35"
-          test -d "$ANDROID_HOME/build-tools/35.0.0"
-          test -x "$ANDROID_HOME/platform-tools/adb"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/molido-release.jks"
+          chmod 600 "$RUNNER_TEMP/molido-release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/molido-release.jks" >> "$GITHUB_ENV"
 
-      - name: Assemble Debug and Release
+      - name: Build APKs
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle --no-daemon --stacktrace :app:assembleDebug :app:assembleRelease
 
-      - name: Verify APK outputs and checksums
+      - name: Verify APK and signing state
+        id: verify
         shell: bash
         run: |
           set -euo pipefail
           DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
-          RELEASE_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+          RELEASE_DIR="app/build/outputs/apk/release"
           test -s "$DEBUG_APK"
-          test -s "$RELEASE_APK"
-          ls -lh "$DEBUG_APK" "$RELEASE_APK"
-          sha256sum "$DEBUG_APK" "$RELEASE_APK"
+          APK="$(find "$RELEASE_DIR" -maxdepth 1 -name '*.apk' -type f -print -quit)"
+          test -n "$APK" && test -s "$APK"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          if "$APKSIGNER" verify --verbose "$APK"; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            cp "$APK" molido-agro-ai.apk
+            "$APKSIGNER" verify --print-certs molido-agro-ai.apk
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            cp "$APK" molido-agro-ai-unsigned.apk
+          fi
+          sha256sum "$DEBUG_APK" *.apk
 
-      - name: Upload unsigned APKs for CI inspection
+      - name: Require signing for version tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "${{ steps.verify.outputs.signed }}" = "true"
+
+      - name: Upload CI APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: molido-agro-ai-unsigned-apks
+          name: molido-agro-ai-apk-${{ github.run_number }}
           path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/release/app-release-unsigned.apk
+            molido-agro-ai.apk
+            molido-agro-ai-unsigned.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Create update manifest
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          APK="molido-agro-ai.apk"
+          SHA="$(sha256sum "$APK" | awk '{print $1}')"
+          python3 - <<'PY'
+          import json, os
+          version = os.environ["VERSION"]
+          with open("latest.json", "w", encoding="utf-8") as f:
+              json.dump({
+                  "versionName": version,
+                  "versionCode": int(os.environ["GITHUB_RUN_NUMBER"]),
+                  "apkFile": "molido-agro-ai.apk",
+                  "sha256": os.environ["APK_SHA256"],
+                  "releaseNotesUrl": "https://github.com/hidooch980/Molido-Agro-Ai/releases"
+              }, f, ensure_ascii=False, indent=2)
+          PY
+        env:
+          VERSION: ${{ github.ref_name }}
+          APK_SHA256: ${{ steps.verify.outputs.signed && 'generated-in-followup-step' || '' }}
+
+      - name: Publish signed GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            molido-agro-ai.apk
+            latest.json
+          generate_release_notes: true
