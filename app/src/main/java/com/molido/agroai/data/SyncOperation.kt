@@ -52,4 +52,7 @@ interface SyncOperationDao {
 
     @Query("SELECT * FROM sync_operations WHERE idempotencyKey = :key LIMIT 1")
     suspend fun findByIdempotencyKey(key: String): SyncOperationEntity?
+
+    @Query("SELECT * FROM sync_operations WHERE entityType = :type AND entityId = :entityId AND state = 'PENDING' LIMIT 1")
+    suspend fun pendingForEntity(type: String, entityId: String): SyncOperationEntity?
 }
