@@ -144,7 +144,7 @@ private fun GreenhousePage(items: List<GreenhouseEntity>, onSave: (String, Doubl
         Field("نام گلخانه", name) { name = it }
         Field("مساحت (مترمربع)", area) { area = it }
         Field("موقعیت یا توضیحات", location) { location = it }
-        Button(onClick = { onSave(name, area.toDouble(), location); name = ""; area = ""; location = "" }, enabled = name.isNotBlank() && (area.toDoubleOrNull() ?: 0.0) > 0, modifier = Modifier.fillMaxWidth()) { Text("ذخیره گلخانه") }
+        Button(onClick = { onSave(name, area.toDouble(), location); name = ""; area = ""; location = "" }, enabled = name.isNotBlank() && (area.toDoubleOrNull()?.let { it.isFinite() && it in 1000.0..5000.0 } == true), modifier = Modifier.fillMaxWidth()) { Text("ذخیره گلخانه") }
         Heading("گلخانه‌های ثبت‌شده (${items.size})")
         if (items.isEmpty()) PanelCard("هنوز گلخانه‌ای ثبت نشده است.")
         items.forEach { PanelCard("${it.name}\nمساحت: ${it.areaSquareMeters.asMoney()} مترمربع\n${it.location}") }
@@ -170,7 +170,7 @@ private fun CropPage(greenhouses: List<GreenhouseEntity>, cycles: List<CropCycle
         Field("مساحت زیر کشت (مترمربع)", area) { area = it }
         Field("تعداد بوته (اختیاری)", plants) { plants = it }
         Field("یادداشت", notes) { notes = it }
-        Button(onClick = { onSave(greenhouse, crop, area.toDouble(), plants.toIntOrNull(), notes); area = ""; plants = ""; notes = "" }, enabled = greenhouse.isNotBlank() && (area.toDoubleOrNull() ?: 0.0) > 0 && (plants.isBlank() || (plants.toIntOrNull() ?: -1) >= 0), modifier = Modifier.fillMaxWidth()) { Text("ثبت دوره کشت") }
+        Button(onClick = { onSave(greenhouse, crop, area.toDouble(), plants.toIntOrNull(), notes); area = ""; plants = ""; notes = "" }, enabled = greenhouse.isNotBlank() && (area.toDoubleOrNull()?.let { value -> value.isFinite() && value > 0.0 && value <= (greenhouses.firstOrNull { it.id == greenhouse }?.areaSquareMeters ?: 0.0) } == true) && (plants.isBlank() || (plants.toIntOrNull() ?: -1) >= 0), modifier = Modifier.fillMaxWidth()) { Text("ثبت دوره کشت") }
         Heading("دوره‌ها (${cycles.size})")
         if (cycles.isEmpty()) PanelCard("دوره کشتی ثبت نشده است.")
         cycles.forEach { item ->
@@ -203,7 +203,7 @@ private fun ActivityPage(greenhouses: List<GreenhouseEntity>, items: List<FarmAc
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Column(Modifier.weight(1f)) { Field("مقدار", qty) { qty = it } }; Column(Modifier.weight(1f)) { Field("واحد", unit) { unit = it } } }
         Field("هزینه (ریال، اختیاری)", cost) { cost = it }
         Field("یادداشت", notes) { notes = it }
-        Button(onClick = { onSave(greenhouse.ifBlank { null }, null, type, title, qty.toDoubleOrNull(), unit, cost.toDoubleOrNull(), notes); title = ""; qty = ""; cost = ""; notes = "" }, enabled = title.isNotBlank() && (qty.isBlank() || (qty.toDoubleOrNull() ?: -1.0) >= 0) && (cost.isBlank() || (cost.toDoubleOrNull() ?: -1.0) >= 0), modifier = Modifier.fillMaxWidth()) { Text("ثبت عملیات") }
+        Button(onClick = { onSave(greenhouse.ifBlank { null }, null, type, title, qty.toDoubleOrNull(), unit, cost.toDoubleOrNull(), notes); title = ""; qty = ""; cost = ""; notes = "" }, enabled = title.isNotBlank() && (qty.isBlank() || (qty.toDoubleOrNull()?.let { it.isFinite() && it >= 0.0 } == true)) && (cost.isBlank() || (cost.toDoubleOrNull()?.let { it.isFinite() && it >= 0.0 } == true)), modifier = Modifier.fillMaxWidth()) { Text("ثبت عملیات") }
         Heading("سوابق اخیر")
         if (items.isEmpty()) PanelCard("عملیاتی ثبت نشده است.")
         items.forEach { item ->
@@ -221,7 +221,7 @@ private fun StockPage(items: List<InventoryItemEntity>, onSave: (String, String,
         Field("نام قلم", name) { name = it }; Field("دسته‌بندی", category) { category = it }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Column(Modifier.weight(1f)) { Field("موجودی", quantity) { quantity = it } }; Column(Modifier.weight(1f)) { Field("واحد", unit) { unit = it } } }
         Field("حداقل موجودی هشدار", minimum) { minimum = it }
-        Button(onClick = { onSave(name, category, quantity.toDouble(), unit, minimum.toDoubleOrNull() ?: 0.0); name = ""; quantity = "" }, enabled = name.isNotBlank() && (quantity.toDoubleOrNull() ?: -1.0) >= 0 && (minimum.toDoubleOrNull() ?: -1.0) >= 0, modifier = Modifier.fillMaxWidth()) { Text("ثبت قلم انبار") }
+        Button(onClick = { onSave(name, category, quantity.toDouble(), unit, minimum.toDoubleOrNull() ?: 0.0); name = ""; quantity = "" }, enabled = name.isNotBlank() && (quantity.toDoubleOrNull()?.let { it.isFinite() && it >= 0.0 } == true) && (minimum.toDoubleOrNull()?.let { it.isFinite() && it >= 0.0 } == true), modifier = Modifier.fillMaxWidth()) { Text("ثبت قلم انبار") }
         Heading("موجودی (${items.size})")
         if (items.isEmpty()) PanelCard("انبار خالی است.")
         items.forEach { item -> PanelCard("${item.name} • ${item.quantity.asMoney()} ${item.unit}\n${item.category} • حداقل ${item.minimumQuantity.asMoney()}${if (item.quantity <= item.minimumQuantity) "\nهشدار: موجودی به حداقل رسیده" else ""}") }
@@ -238,7 +238,7 @@ private fun FinancePage(items: List<FinancialEntryEntity>, balance: Double, onSa
             Button(onClick = { type = "INCOME" }, modifier = Modifier.weight(1f)) { Text(if (type == "INCOME") "✓ درآمد" else "درآمد") }
         }
         Field("دسته‌بندی", category) { category = it }; Field("مبلغ به ریال", amount) { amount = it }; Field("شرح", description) { description = it }
-        Button(onClick = { onSave(type, category, amount.toDouble(), description); amount = ""; description = "" }, enabled = (amount.toDoubleOrNull() ?: 0.0) > 0, modifier = Modifier.fillMaxWidth()) { Text("ثبت سند مالی") }
+        Button(onClick = { onSave(type, category, amount.toDouble(), description); amount = ""; description = "" }, enabled = amount.toDoubleOrNull()?.let { it.isFinite() && it > 0.0 } == true, modifier = Modifier.fillMaxWidth()) { Text("ثبت سند مالی") }
         Metric("تراز خالص (ریال)", balance.asMoney(), Modifier.fillMaxWidth())
         Heading("اسناد مالی (${items.size})")
         if (items.isEmpty()) PanelCard("سندی ثبت نشده است.")
