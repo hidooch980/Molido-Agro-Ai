@@ -26,7 +26,7 @@ interface SyncInboxDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun receive(change: SyncInboxEntity): Long
 
-    @Query("SELECT * FROM sync_inbox WHERE state = 'PENDING_REVIEW' ORDER BY updatedAtEpochMillis")
+    @Query("SELECT * FROM sync_inbox WHERE state IN ('PENDING_REVIEW','CONFLICT') ORDER BY updatedAtEpochMillis")
     fun observePending(): Flow<List<SyncInboxEntity>>
 
     @Query("SELECT * FROM sync_inbox WHERE entityType = :type AND entityId = :id ORDER BY serverVersion DESC LIMIT 1")
