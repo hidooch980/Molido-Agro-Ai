@@ -157,7 +157,8 @@ jobs:
           APK="$(find "$RELEASE_DIR" -maxdepth 1 -name '*.apk' -type f -print -quit)"
           test -n "$APK" && test -s "$APK"
           APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
-          if "$APKSIGNER" verify --verbose "$APK"; then
+          if [ -n "${ANDROID_KEYSTORE_PATH:-}" ]; then
+            "$APKSIGNER" verify --verbose "$APK"
             echo "signed=true" >> "$GITHUB_OUTPUT"
             cp "$APK" molido-agro-ai.apk
             "$APKSIGNER" verify --print-certs molido-agro-ai.apk
