@@ -25,6 +25,7 @@ abstract class AgroDatabase : RoomDatabase() {
     abstract fun farmActivityDao(): FarmActivityDao
     abstract fun inventoryDao(): InventoryDao
     abstract fun financeDao(): FinanceDao
+    abstract fun syncOperationDao(): SyncOperationDao
 
     companion object {
 
