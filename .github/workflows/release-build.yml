@@ -130,7 +130,6 @@ jobs:
           fi
           echo "P12 container, store password, and configured alias validated."
           echo "ANDROID_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
-          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
 
       - name: Build APKs
         env:
