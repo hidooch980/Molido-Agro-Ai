@@ -6,6 +6,7 @@ import android.content.Context
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -28,7 +29,7 @@ object SyncScheduler {
         val request = androidx.work.OneTimeWorkRequestBuilder<AgroSyncWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
-        WorkManager.getInstance(context).enqueue(request)
+        WorkManager.getInstance(context).enqueueUniqueWork("molido-agro-sync-immediate", ExistingWorkPolicy.APPEND_OR_REPLACE, request)
     }
 }
 
