@@ -11,3 +11,7 @@ local.properties
 .env
 .env.*
 !.env.example
+
+# Self-hosted API local secrets and data
+server/.venv/
+server/*.sqlite3
