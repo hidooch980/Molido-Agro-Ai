@@ -1,0 +1,18 @@
+package com.molido.agroai.data
+
+import android.content.Context
+import androidx.room.Room
+
+object AgroDatabaseProvider {
+    @Volatile
+    private var instance: AgroDatabase? = null
+
+    fun get(context: Context): AgroDatabase =
+        instance ?: synchronized(this) {
+            instance ?: Room.databaseBuilder(
+                context.applicationContext,
+                AgroDatabase::class.java,
+                "molido_agro_local.db"
+            ).build().also { instance = it }
+        }
+}
