@@ -81,3 +81,51 @@ suspend fun AgroDatabase.insertAndEnqueue(
     }
     SyncScheduler.runNow(context)
 }
+
+/** Update a local record and its outbound versioned operation atomically. */
+suspend fun AgroDatabase.updateAndEnqueue(
+    context: Context,
+    entityType: String,
+    entityId: String,
+    payloadJson: String,
+    updateLocal: suspend () -> Unit
+) {
+    require(entityType.matches(Regex("[a-z_]{1,40}")))
+    require(entityId.isNotBlank() && payloadJson.length <= 1_000_000)
+    withTransaction {
+        updateLocal()
+        val base = syncInboxDao().latest(entityType, entityId)?.serverVersion ?: 0
+        val now = System.currentTimeMillis()
+        syncOperationDao().enqueue(SyncOperationEntity(
+            id = UUID.randomUUID().toString(),
+            idempotencyKey = "UPDATE:$entityType:$entityId:${UUID.randomUUID()}",
+            entityType = entityType, entityId = entityId, operation = "UPDATE",
+            payloadJson = SyncPayloadCipher.encrypt(context, payloadJson),
+            createdAtEpochMillis = now, nextAttemptAtEpochMillis = now, baseVersion = base
+        ))
+    }
+    SyncScheduler.runNow(context)
+}
+
+/** Delete locally while preserving a versioned server tombstone in the outbox. */
+suspend fun AgroDatabase.deleteAndEnqueue(
+    context: Context,
+    entityType: String,
+    entityId: String,
+    deleteLocal: suspend () -> Unit
+) {
+    require(entityType.matches(Regex("[a-z_]{1,40}")) && entityId.isNotBlank())
+    withTransaction {
+        val base = syncInboxDao().latest(entityType, entityId)?.serverVersion ?: 0
+        deleteLocal()
+        val now = System.currentTimeMillis()
+        syncOperationDao().enqueue(SyncOperationEntity(
+            id = UUID.randomUUID().toString(),
+            idempotencyKey = "DELETE:$entityType:$entityId:${UUID.randomUUID()}",
+            entityType = entityType, entityId = entityId, operation = "DELETE",
+            payloadJson = SyncPayloadCipher.encrypt(context, "{}"),
+            createdAtEpochMillis = now, nextAttemptAtEpochMillis = now, baseVersion = base
+        ))
+    }
+    SyncScheduler.runNow(context)
+}
