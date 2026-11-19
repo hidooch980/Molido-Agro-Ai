@@ -7,7 +7,7 @@ object SyncRetryPolicy {
         require(attemptCount >= 0)
         val exponent = attemptCount.coerceAtMost(10)
         val delay = (30_000L * (1L shl exponent)).coerceAtMost(6L * 60L * 60L * 1000L)
-        return nowEpochMillis + delay
+        return if (nowEpochMillis > Long.MAX_VALUE - delay) Long.MAX_VALUE else nowEpochMillis + delay
     }
 }
 
