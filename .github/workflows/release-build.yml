@@ -97,7 +97,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_VERSION_CODE: ${{ github.run_number }}
           ANDROID_VERSION_NAME: ${{ github.ref_name }}
-        run: gradle --no-daemon --stacktrace :app:assembleDebug :app:assembleRelease
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
 
       - name: Verify APK and signing state
         id: verify
