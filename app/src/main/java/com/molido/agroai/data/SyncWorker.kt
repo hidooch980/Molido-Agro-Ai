@@ -125,6 +125,8 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
     private fun request(endpoint: String, token: String, body: String): String {
         val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
+            instanceFollowRedirects = false
+            useCaches = false
             connectTimeout = 15_000
             readTimeout = 20_000
             doOutput = true
