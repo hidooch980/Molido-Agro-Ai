@@ -97,7 +97,7 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
                 serverVersion = version, updatedAtEpochMillis = change.optLong("updatedAt"),
                 deleted = change.optBoolean("deleted"), state = state
             ))
-            newestCursor = maxOf(newestCursor, change.optLong("updatedAt"))
+            newestCursor = maxOf(newestCursor, change.optLong("cursorId"))
         }
         val serverCursor = response.optLong("cursor", newestCursor)
         check(prefs.edit().putLong("remote_cursor", maxOf(newestCursor, serverCursor)).commit())
