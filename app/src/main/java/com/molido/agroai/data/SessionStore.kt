@@ -15,30 +15,36 @@ class SessionStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("molido_secure_session", Context.MODE_PRIVATE)
     private val alias = "molido.session.aes.v1"
 
-    fun saveAccessToken(token: String) {
-        require(token.isNotBlank() && token.length <= 8192)
+    fun saveAccessToken(token: String) = saveSecret("access_token", token)
+    fun saveUserId(userId: String) = saveSecret("user_id", userId)
+    fun saveSession(token: String, userId: String) {
+        require(token.isNotBlank() && userId.isNotBlank())
+        saveSecret("access_token", token)
+        saveSecret("user_id", userId)
+    }
+    fun accessToken(): String? = readSecret("access_token")
+    fun userId(): String? = readSecret("user_id")
+    fun clear() { prefs.edit().clear().apply() }
+
+    private fun saveSecret(name: String, value: String) {
+        require(value.isNotBlank() && value.length <= 8192)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
-        val encrypted = cipher.doFinal(token.toByteArray(Charsets.UTF_8))
-        val value = Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)
-        check(prefs.edit().putString("access_token", value).commit()) { "Could not persist session" }
+        val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+        val encoded = Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)
+        check(prefs.edit().putString(name, encoded).commit()) { "Could not persist session" }
     }
 
-    fun accessToken(): String? {
-        val value = prefs.getString("access_token", null) ?: return null
+    private fun readSecret(name: String): String? {
+        val value = prefs.getString(name, null) ?: return null
         return try {
             val bytes = Base64.decode(value, Base64.NO_WRAP)
             require(bytes.size > 12)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
             String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
-        } catch (_: Exception) {
-            clear()
-            null
-        }
+        } catch (_: Exception) { clear(); null }
     }
-
-    fun clear() { prefs.edit().remove("access_token").apply() }
 
     private fun getOrCreateKey(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
