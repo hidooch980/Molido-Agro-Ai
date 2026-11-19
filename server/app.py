@@ -8,6 +8,24 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.environ.get("MOLIDO_DB_PATH", "molido-server.sqlite3"))
 JWT_SECRET = os.environ.get("MOLIDO_JWT_SECRET", "")
 TOKEN_TTL = 60 * 60 * 24 * 14
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+def data_key() -> bytes:
+    raw = os.environ.get("MOLIDO_DATA_KEY", "")
+    try: key = base64.urlsafe_b64decode(raw + "=" * ((4 - len(raw) % 4) % 4))
+    except Exception: key = b""
+    if len(key) != 32: raise HTTPException(503, "Server data encryption is not configured")
+    return key
+
+def encrypt_payload(value: dict[str, Any]) -> str:
+    nonce = secrets.token_bytes(12)
+    encrypted = AESGCM(data_key()).encrypt(nonce, json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode(), None)
+    return b64(nonce + encrypted)
+
+def decrypt_payload(value: str) -> dict[str, Any]:
+    raw = base64.urlsafe_b64decode(value + "=" * ((4 - len(value) % 4) % 4))
+    plain = AESGCM(data_key()).decrypt(raw[:12], raw[12:], None)
+    return json.loads(plain)
 app = FastAPI(title="Molido Agro Sync API", version="1.0.0")
 
 def db():
@@ -95,7 +113,7 @@ def push(body: PushBody, authorization: str | None = Header(default=None)):
                 result={"idempotencyKey":op.idempotencyKey,"status":"conflict","serverVersion":version}
             else:
                 next_version=version+1
-                payload=json.dumps(op.payload,separators=(",",":"),ensure_ascii=False)
+                payload=encrypt_payload(op.payload)
                 updated_at = int(time.time() * 1000)
                 deleted = 1 if op.operation == "DELETE" else 0
                 c.execute("INSERT INTO records VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,entity_type,entity_id) DO UPDATE SET payload=excluded.payload,version=excluded.version,updated_at=excluded.updated_at,deleted=excluded.deleted",(uid,op.entityType,op.entityId,payload,next_version,updated_at,deleted))
@@ -110,6 +128,6 @@ def pull(body: PullBody, authorization: str | None = Header(default=None)):
     uid=current_user(authorization)
     with db() as c:
         rows=c.execute("SELECT id,entity_type,entity_id,payload,version,updated_at,deleted FROM change_log WHERE user_id=? AND id>? ORDER BY id LIMIT ?",(uid,body.cursor,body.limit)).fetchall()
-    changes=[{"cursorId":r["id"],"entityType":r["entity_type"],"entityId":r["entity_id"],"payload":json.loads(r["payload"]),"version":r["version"],"updatedAt":r["updated_at"],"deleted":bool(r["deleted"])} for r in rows]
+    changes=[{"cursorId":r["id"],"entityType":r["entity_type"],"entityId":r["entity_id"],"payload":decrypt_payload(r["payload"]),"version":r["version"],"updatedAt":r["updated_at"],"deleted":bool(r["deleted"])} for r in rows]
     cursor=max([body.cursor]+[r["id"] for r in rows])
     return {"changes":changes,"cursor":cursor}
