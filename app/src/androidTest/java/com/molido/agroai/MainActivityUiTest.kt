@@ -1,6 +1,6 @@
 package com.molido.agroai
 
-import androidx.compose.ui.test.assertExists
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import org.junit.Rule
@@ -12,9 +12,9 @@ class MainActivityUiTest {
 
     @Test
     fun dashboardAndNavigationRenderInPersian() {
-        composeRule.onNodeWithText("مولیدو آگرو").assertExists()
-        composeRule.onNodeWithText("خانه").assertExists()
-        composeRule.onNodeWithText("گلخانه").assertExists()
-        composeRule.onNodeWithText("مدیریت هوشمند کشاورزی و گلخانه").assertExists()
+        composeRule.onNodeWithText("مولیدو آگرو").assertIsDisplayed()
+        composeRule.onNodeWithText("خانه").assertIsDisplayed()
+        composeRule.onNodeWithText("گلخانه").assertIsDisplayed()
+        composeRule.onNodeWithText("مدیریت هوشمند کشاورزی و گلخانه").assertIsDisplayed()
     }
 }
