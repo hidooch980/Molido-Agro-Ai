@@ -13,9 +13,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         FarmActivityEntity::class,
         InventoryItemEntity::class,
         FinancialEntryEntity::class,
-        SyncOperationEntity::class
+        SyncOperationEntity::class,
+        AppMetadataEntity::class,
+        SyncInboxEntity::class
     ],
-    version = 3,
+    version = 5,
     exportSchema = false
 )
 abstract class AgroDatabase : RoomDatabase() {
@@ -26,8 +28,24 @@ abstract class AgroDatabase : RoomDatabase() {
     abstract fun inventoryDao(): InventoryDao
     abstract fun financeDao(): FinanceDao
     abstract fun syncOperationDao(): SyncOperationDao
+    abstract fun appMetadataDao(): AppMetadataDao
+    abstract fun syncInboxDao(): SyncInboxDao
 
     companion object {
+
+
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS app_metadata (key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(key))")
+            }
+        }
+
+        val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS sync_inbox (id TEXT NOT NULL, entityType TEXT NOT NULL, entityId TEXT NOT NULL, encryptedPayload TEXT NOT NULL, serverVersion INTEGER NOT NULL, updatedAtEpochMillis INTEGER NOT NULL, deleted INTEGER NOT NULL, state TEXT NOT NULL, PRIMARY KEY(id))")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_sync_inbox_entityType_entityId_serverVersion ON sync_inbox(entityType, entityId, serverVersion)")
+            }
+        }
 
         val MIGRATION_2_3: Migration = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
