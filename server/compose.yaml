@@ -1,0 +1,19 @@
+services:
+  agro-sync:
+    build: .
+    restart: unless-stopped
+    environment:
+      MOLIDO_DB_PATH: /data/molido.sqlite3
+      MOLIDO_JWT_SECRET: ${MOLIDO_JWT_SECRET:?Set MOLIDO_JWT_SECRET in the environment}
+      MOLIDO_DATA_KEY: ${MOLIDO_DATA_KEY:?Set MOLIDO_DATA_KEY in the environment}
+    volumes:
+      - agro_sync_data:/data
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  agro_sync_data:
