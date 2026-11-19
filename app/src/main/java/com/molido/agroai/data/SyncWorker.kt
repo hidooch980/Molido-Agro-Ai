@@ -88,7 +88,7 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
             val entityId = change.getString("entityId")
             val version = change.getInt("version")
             val payload = change.optJSONObject("payload") ?: JSONObject()
-            val localPending = outbox.pendingForEntity(type, entityId)
+            val localPending = outbox.pendingForEntity(type, entityId) ?: outbox.conflictedForEntity(type, entityId)
             val state = if (localPending != null) "CONFLICT" else "PENDING_REVIEW"
             if (localPending != null) outbox.markConflict(localPending.id, "Remote update arrived while local changes were pending")
             inbox.receive(SyncInboxEntity(
