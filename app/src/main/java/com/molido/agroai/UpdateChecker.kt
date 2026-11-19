@@ -25,6 +25,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 
+private const val MAX_UPDATE_BYTES = 100L * 1024L * 1024L
+
 private data class AvailableUpdate(val versionName: String, val versionCode: Int, val apkFile: String, val sha256: String)
 
 @Composable
@@ -45,7 +47,12 @@ fun UpdateCheckerCard() {
                 try {
                     check(connection.responseCode == 200)
                     val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-                    AvailableUpdate(json.getString("versionName"), json.getInt("versionCode"), json.getString("apkFile"), json.getString("sha256").lowercase())
+                    AvailableUpdate(json.getString("versionName"), json.getInt("versionCode"), json.getString("apkFile"), json.getString("sha256").lowercase()).also { candidate ->
+                        require(candidate.versionCode > 0)
+                        require(candidate.versionName.isNotBlank() && candidate.versionName.length <= 64)
+                        require(candidate.apkFile == "molido-agro-ai.apk")
+                        require(candidate.sha256.matches(Regex("[a-f0-9]{64}")))
+                    }
                 } finally { connection.disconnect() }
             }
         }
@@ -76,12 +83,32 @@ fun UpdateCheckerCard() {
                                 connection.instanceFollowRedirects = true
                                 try {
                                     check(connection.responseCode == 200)
+                                    val declaredLength = connection.contentLengthLong
+                                    require(declaredLength in 1..MAX_UPDATE_BYTES) { "invalid APK size" }
                                     val dir = File(context.cacheDir, "updates").apply { mkdirs() }
                                     val file = File(dir, "molido-agro-ai-${candidate.versionCode}.apk")
-                                    connection.inputStream.use { input -> file.outputStream().use { output -> input.copyTo(output) } }
-                                    val digest = MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) }
-                                    check(digest.equals(candidate.sha256, ignoreCase = true)) { "checksum mismatch" }
-                                    file
+                                    try {
+                                        val digest = MessageDigest.getInstance("SHA-256")
+                                        var total = 0L
+                                        connection.inputStream.use { input -> file.outputStream().use { output ->
+                                            val buffer = ByteArray(16 * 1024)
+                                            while (true) {
+                                                val count = input.read(buffer)
+                                                if (count < 0) break
+                                                total += count
+                                                require(total <= MAX_UPDATE_BYTES) { "APK exceeds size limit" }
+                                                digest.update(buffer, 0, count)
+                                                output.write(buffer, 0, count)
+                                            }
+                                        } }
+                                        require(total == declaredLength) { "incomplete APK download" }
+                                        val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
+                                        check(actualHash == candidate.sha256) { "checksum mismatch" }
+                                        file
+                                    } catch (error: Exception) {
+                                        file.delete()
+                                        throw error
+                                    }
                                 } finally { connection.disconnect() }
                             }
                         }
