@@ -66,6 +66,7 @@ private fun AgroApp() {
                 Text("مدیریت هوشمند کشاورزی و گلخانه", color = Muted)
                 Text(notice, color = Color(0xFF9BE0B1), style = MaterialTheme.typography.bodySmall)
             }
+            UpdateCheckerCard()
             when (tab) {
                 Tab.HOME -> HomePage(greenhouses.size, cycles.count { it.status == "ACTIVE" }, activities.size, stock.size, balance)
                 Tab.GREENHOUSE -> GreenhousePage(greenhouses, onSave = { n, a, l ->
