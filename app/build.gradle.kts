@@ -19,8 +19,8 @@ android {
         applicationId = "com.molido.agroai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = System.getenv("ANDROID_VERSION_CODE")?.toIntOrNull() ?: 1
+        versionName = System.getenv("ANDROID_VERSION_NAME")?.removePrefix("v") ?: "1.0.0"
     }
 
     signingConfigs {
