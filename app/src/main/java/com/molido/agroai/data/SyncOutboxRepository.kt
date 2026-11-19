@@ -11,11 +11,11 @@ object SyncRetryPolicy {
         val delay = (30_000L * (1L shl exponent)).coerceAtMost(6L * 60L * 60L * 1000L)
         return if (nowEpochMillis > Long.MAX_VALUE - delay) Long.MAX_VALUE else nowEpochMillis + delay
     }
-    SyncScheduler.runNow(context)
 }
 
 class SyncOutboxRepository(private val dao: SyncOperationDao) {
     suspend fun enqueue(
+        context: Context,
         idempotencyKey: String,
         entityType: String,
         entityId: String,
@@ -37,7 +37,9 @@ class SyncOutboxRepository(private val dao: SyncOperationDao) {
             createdAtEpochMillis = now,
             nextAttemptAtEpochMillis = now
         )
-        return dao.enqueue(row) != -1L
+        val inserted = dao.enqueue(row) != -1L
+        if (inserted) SyncScheduler.runNow(context)
+        return inserted
     }
 
     suspend fun retry(id: String, attemptCount: Int, error: String, nowEpochMillis: Long = System.currentTimeMillis()) {
