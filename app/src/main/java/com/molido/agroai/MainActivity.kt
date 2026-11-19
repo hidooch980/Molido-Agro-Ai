@@ -72,6 +72,7 @@ private fun AgroApp() {
             }
             UpdateCheckerCard()
             AuthPanel(context)
+            SyncInboxPanel(context, db)
             when (tab) {
                 Tab.HOME -> HomePage(greenhouses.size, cycles.count { it.status == "ACTIVE" }, activities.size, stock.size, balance, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
                 Tab.GREENHOUSE -> GreenhousePage(greenhouses, onSave = { n, a, l ->
@@ -89,6 +90,30 @@ private fun AgroApp() {
                 Tab.MONEY -> FinancePage(finance, balance, onSave = { type, cat, amount, desc ->
                     scope.launch { try { val id = UUID.randomUUID().toString(); val item = FinancialEntryEntity(id, null, type, cat, amount, description = desc); val payload = JSONObject().put("id", id).put("type", type).put("category", cat).put("amount", amount).put("currency", item.currency).put("occurredAtEpochMillis", item.occurredAtEpochMillis).put("description", desc).toString(); db.insertAndEnqueue(context, "financial_entry", id, payload) { db.financeDao().insert(item) }; notice = "سند مالی ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت سند مالی ناموفق بود." } }
                 })
+            }
+        }
+    }
+}
+
+@Composable
+private fun SyncInboxPanel(context: android.content.Context, db: AgroDatabase) {
+    val changes by db.syncInboxDao().observePending().collectAsState(initial = emptyList())
+    val scope = rememberCoroutineScope()
+    if (changes.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
+        Text("تغییرات دریافتی و تعارض‌ها (${changes.size})", fontWeight = FontWeight.Bold)
+        changes.forEach { change ->
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("${change.entityType} • ${change.entityId} • نسخه سرور ${change.serverVersion}")
+                    Text(if (change.state == "CONFLICT") "تعارض با تغییر محلی" else "نسخه دریافتی آماده بررسی", color = Muted)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { scope.launch { runCatching { SyncConflictResolver(context, db).acceptServerVersion(change) } } }) { Text("پذیرش نسخه سرور") }
+                        if (change.state == "CONFLICT") {
+                            OutlinedButton(onClick = { scope.launch { runCatching { SyncConflictResolver(context, db).keepLocalVersion(change) } } }) { Text("حفظ نسخه دستگاه") }
+                        }
+                    }
+                }
             }
         }
     }
