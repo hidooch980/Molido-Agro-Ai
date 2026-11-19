@@ -27,7 +27,8 @@ data class SyncOperationEntity(
     val attemptCount: Int = 0,
     val createdAtEpochMillis: Long = System.currentTimeMillis(),
     val nextAttemptAtEpochMillis: Long = System.currentTimeMillis(),
-    val lastError: String? = null
+    val lastError: String? = null,
+    val baseVersion: Int = 0
 )
 
 @Dao
@@ -55,4 +56,7 @@ interface SyncOperationDao {
 
     @Query("SELECT * FROM sync_operations WHERE entityType = :type AND entityId = :entityId AND state = 'PENDING' LIMIT 1")
     suspend fun pendingForEntity(type: String, entityId: String): SyncOperationEntity?
+
+    @Query("SELECT * FROM sync_operations WHERE entityType = :type AND entityId = :entityId AND state = 'CONFLICT' ORDER BY createdAtEpochMillis DESC LIMIT 1")
+    suspend fun conflictedForEntity(type: String, entityId: String): SyncOperationEntity?
 }
