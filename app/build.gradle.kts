@@ -22,6 +22,7 @@ android {
         targetSdk = 35
         versionCode = System.getenv("ANDROID_VERSION_CODE")?.toIntOrNull() ?: 1
         versionName = System.getenv("ANDROID_VERSION_NAME")?.removePrefix("v") ?: "1.0.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -55,7 +56,6 @@ android {
 
     kotlinOptions { jvmTarget = "17" }
 
-    defaultConfig { testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
 
     buildFeatures {
         compose = true
