@@ -51,7 +51,7 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
                         .put("entityId", operation.entityId)
                         .put("operation", operation.operation)
                         .put("payload", payload)
-                        .put("baseVersion", 0)))
+                        .put("baseVersion", operation.baseVersion)))
                 val response = request("$base/v1/sync/push", token, body.toString())
                 val result = JSONObject(response).getJSONArray("results").getJSONObject(0)
                 when (result.optString("status")) {
