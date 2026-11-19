@@ -1,6 +1,7 @@
 package com.molido.agroai.data
 
 import kotlinx.coroutines.flow.Flow
+import com.molido.agroai.domain.CropCatalog
 import java.util.UUID
 
 class CropObservationRepository(
@@ -24,14 +25,14 @@ class CropObservationRepository(
         photoUri: String? = null,
         source: String = "USER"
     ) {
-        require(cropCode.isNotBlank()) { "cropCode is required" }
+        require(CropCatalog.find(cropCode) != null) { "cropCode is not supported" }
         require(growthStage.isNotBlank()) { "growthStage is required" }
         require(source in setOf("USER", "SENSOR", "IMPORT", "AI_ESTIMATE"))
-        require(humidityPercent == null || humidityPercent in 0.0..100.0)
-        require(soilPh == null || soilPh in 0.0..14.0)
-        require(temperatureCelsius == null || temperatureCelsius in -10.0..60.0)
-        require(soilEc == null || soilEc in 0.0..100.0)
-        require(irrigationLiters == null || irrigationLiters in 0.0..100000.0)
+        require(humidityPercent == null || (humidityPercent.isFinite() && humidityPercent in 0.0..100.0))
+        require(soilPh == null || (soilPh.isFinite() && soilPh in 0.0..14.0))
+        require(temperatureCelsius == null || (temperatureCelsius.isFinite() && temperatureCelsius in -10.0..60.0))
+        require(soilEc == null || (soilEc.isFinite() && soilEc in 0.0..100.0))
+        require(irrigationLiters == null || (irrigationLiters.isFinite() && irrigationLiters in 0.0..100000.0))
         require(notes.length <= 4000)
 
         dao.insert(
