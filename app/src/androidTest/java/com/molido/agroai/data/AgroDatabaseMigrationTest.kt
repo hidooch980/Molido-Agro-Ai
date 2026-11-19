@@ -31,7 +31,7 @@ class AgroDatabaseMigrationTest {
             val db = helper.writableDatabase
             AgroDatabase.MIGRATION_1_2.migrate(db)
             AgroDatabase.MIGRATION_2_3.migrate(db)
-            db.execSQL("INSERT INTO sync_operations VALUES ('legacy-1','CREATE:greenhouse:1','greenhouse','1','CREATE','{}','PENDING',0,1,1,NULL,0)")
+            db.execSQL("INSERT INTO sync_operations VALUES ('legacy-1','CREATE:greenhouse:1','greenhouse','1','CREATE','{}','PENDING',0,1,1,NULL)")
             AgroDatabase.MIGRATION_3_4.migrate(db)
             AgroDatabase.MIGRATION_4_5.migrate(db)
             AgroDatabase.MIGRATION_5_6.migrate(db)
