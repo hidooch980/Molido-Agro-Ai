@@ -61,6 +61,7 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          GITHUB_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           if [ -z "${KEYSTORE_BASE64:-}" ]; then
@@ -78,8 +79,13 @@ jobs:
           fi
           chmod 600 "$KEYSTORE"
           if ! keytool -list -keystore "$KEYSTORE" -storetype PKCS12 -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
-            echo "::error::The P12 file, store password, or key alias is invalid. Verify the GitHub Actions secrets; no secret values were printed."
-            exit 1
+            rm -f "$KEYSTORE"
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              echo "::error::The P12 file, store password, or key alias is invalid. Signed releases are blocked."
+              exit 1
+            fi
+            echo "::warning::Signing configuration is invalid; continuing with an unsigned CI APK. Version-tag releases remain blocked."
+            exit 0
           fi
           echo "P12 container and configured alias validated."
           echo "ANDROID_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
