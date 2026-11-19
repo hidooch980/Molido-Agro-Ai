@@ -22,3 +22,13 @@ Record and change-log payloads are encrypted at rest with AES-256-GCM using `MOL
 
 ## Current limits
 This is an initial single-node API, not a hardened public multi-tenant deployment. Add rate limiting, email/account recovery, token revocation/rotation, audit logging, TLS, database backup/restore drills and operational monitoring before production.
+
+## Container deployment
+
+Copy `.env.example` to `.env`, generate independent random secrets for `MOLIDO_JWT_SECRET` and `MOLIDO_DATA_KEY`, and keep the populated file outside source control. Then run:
+
+```sh
+docker compose -f compose.yaml up -d --build
+```
+
+The service binds to loopback port 8080. Put a TLS reverse proxy in front of it; do not expose port 8080 directly to the public internet. Persist and back up both the SQLite volume and the data-encryption key.
