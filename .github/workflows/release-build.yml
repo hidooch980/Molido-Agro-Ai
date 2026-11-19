@@ -34,9 +34,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Install required Android SDK packages
-        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+        with:
+          packages: |
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -52,23 +54,28 @@ jobs:
           sdkmanager --list_installed
           test -d "$ANDROID_HOME/platforms/android-35"
           test -d "$ANDROID_HOME/build-tools/35.0.0"
+          test -x "$ANDROID_HOME/platform-tools/adb"
 
-      - name: Assemble Release
-        run: gradle --no-daemon --stacktrace :app:assembleRelease
+      - name: Assemble Debug and Release
+        run: gradle --no-daemon --stacktrace :app:assembleDebug :app:assembleRelease
 
-      - name: Verify Release APK exists
+      - name: Verify APK outputs and checksums
         shell: bash
         run: |
           set -euo pipefail
-          APK="app/build/outputs/apk/release/app-release-unsigned.apk"
-          test -s "$APK"
-          ls -lh "$APK"
-          sha256sum "$APK"
+          DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
+          RELEASE_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s "$DEBUG_APK"
+          test -s "$RELEASE_APK"
+          ls -lh "$DEBUG_APK" "$RELEASE_APK"
+          sha256sum "$DEBUG_APK" "$RELEASE_APK"
 
-      - name: Upload unsigned Release build for CI inspection
+      - name: Upload unsigned APKs for CI inspection
         uses: actions/upload-artifact@v4
         with:
-          name: molido-agro-ai-release-unsigned
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          name: molido-agro-ai-unsigned-apks
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
