@@ -1,6 +1,7 @@
 package com.molido.agroai.data
 
-import android.content.Context\nimport androidx.room.withTransaction
+import android.content.Context\nimport android.content.Context
+import androidx.room.withTransaction
 import java.util.UUID
 
 object SyncRetryPolicy {
@@ -10,6 +11,7 @@ object SyncRetryPolicy {
         val delay = (30_000L * (1L shl exponent)).coerceAtMost(6L * 60L * 60L * 1000L)
         return if (nowEpochMillis > Long.MAX_VALUE - delay) Long.MAX_VALUE else nowEpochMillis + delay
     }
+    SyncScheduler.runNow(context)
 }
 
 class SyncOutboxRepository(private val dao: SyncOperationDao) {
@@ -50,6 +52,7 @@ class SyncOutboxRepository(private val dao: SyncOperationDao) {
  * The event remains local until a real authenticated sync transport is configured.
  */
 suspend fun AgroDatabase.insertAndEnqueue(
+    context: Context,
     entityType: String,
     entityId: String,
     payloadJson: String,
@@ -68,7 +71,7 @@ suspend fun AgroDatabase.insertAndEnqueue(
                 entityType = entityType,
                 entityId = entityId,
                 operation = "CREATE",
-                payloadJson = payloadJson,
+                payloadJson = SyncPayloadCipher.encrypt(context, payloadJson),
                 createdAtEpochMillis = now,
                 nextAttemptAtEpochMillis = now
             )
