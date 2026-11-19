@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.molido.agroai.data.*
 import com.molido.agroai.domain.CropCatalog
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import java.util.UUID
 
 private val Forest = Color(0xFF123C2B)
@@ -70,19 +71,19 @@ private fun AgroApp() {
             when (tab) {
                 Tab.HOME -> HomePage(greenhouses.size, cycles.count { it.status == "ACTIVE" }, activities.size, stock.size, balance, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
                 Tab.GREENHOUSE -> GreenhousePage(greenhouses, onSave = { n, a, l ->
-                    scope.launch { try { db.greenhouseDao().insert(GreenhouseEntity(UUID.randomUUID().toString(), n.trim(), a, l.trim())); notice = "گلخانه ثبت شد." } catch (_: Exception) { notice = "ثبت ناموفق؛ نام گلخانه باید یکتا باشد." } }
+                    scope.launch { try { val id = UUID.randomUUID().toString(); val item = GreenhouseEntity(id, n.trim(), a, l.trim()); val payload = JSONObject().put("id", id).put("name", item.name).put("areaSquareMeters", a).put("location", item.location).put("cultivationMethod", item.cultivationMethod).toString(); db.insertAndEnqueue("greenhouse", id, payload) { db.greenhouseDao().insert(item) }; notice = "گلخانه ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت ناموفق؛ نام گلخانه باید یکتا باشد." } }
                 })
                 Tab.CROP -> CropPage(greenhouses, cycles, onSave = { g, c, a, p, n ->
-                    scope.launch { try { db.cropCycleDao().insert(CropCycleEntity(UUID.randomUUID().toString(), g, c, System.currentTimeMillis(), null, a, p, notes = n)); notice = "دوره کشت ثبت شد." } catch (_: Exception) { notice = "ثبت دوره کشت ناموفق بود." } }
+                    scope.launch { try { val id = UUID.randomUUID().toString(); val item = CropCycleEntity(id, g, c, System.currentTimeMillis(), null, a, p, notes = n); val payload = JSONObject().put("id", id).put("greenhouseId", g).put("cropCode", c).put("plantedAreaSquareMeters", a).put("plantCount", p).put("status", item.status).put("notes", n).put("startDateEpochMillis", item.startDateEpochMillis).toString(); db.insertAndEnqueue("crop_cycle", id, payload) { db.cropCycleDao().insert(item) }; notice = "دوره کشت ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت دوره کشت ناموفق بود." } }
                 })
                 Tab.LOG -> ActivityPage(greenhouses, activities, onSave = { g, c, type, title, qty, unit, cost, notes ->
-                    scope.launch { try { db.farmActivityDao().insert(FarmActivityEntity(UUID.randomUUID().toString(), g, null, c, type, title.trim(), qty, unit, cost, notes = notes)); notice = "عملیات ثبت شد." } catch (_: Exception) { notice = "ثبت عملیات ناموفق بود." } }
+                    scope.launch { try { val id = UUID.randomUUID().toString(); val item = FarmActivityEntity(id, g, null, c, type, title.trim(), qty, unit, cost, notes = notes); val payload = JSONObject().put("id", id).put("greenhouseId", g).put("cropCode", c).put("type", type).put("title", item.title).put("quantity", qty).put("unit", unit).put("cost", cost).put("occurredAtEpochMillis", item.occurredAtEpochMillis).put("notes", notes).toString(); db.insertAndEnqueue("farm_activity", id, payload) { db.farmActivityDao().insert(item) }; notice = "عملیات ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت عملیات ناموفق بود." } }
                 })
                 Tab.STOCK -> StockPage(stock, onSave = { n, cat, q, u, min ->
-                    scope.launch { try { db.inventoryDao().insert(InventoryItemEntity(UUID.randomUUID().toString(), n.trim(), cat, q, u, min)); notice = "قلم انبار ثبت شد." } catch (_: Exception) { notice = "نام قلم انبار باید یکتا باشد." } }
+                    scope.launch { try { val id = UUID.randomUUID().toString(); val item = InventoryItemEntity(id, n.trim(), cat, q, u, min); val payload = JSONObject().put("id", id).put("name", item.name).put("category", cat).put("quantity", q).put("unit", u).put("minimumQuantity", min).put("updatedAtEpochMillis", item.updatedAtEpochMillis).toString(); db.insertAndEnqueue("inventory_item", id, payload) { db.inventoryDao().insert(item) }; notice = "قلم انبار ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "نام قلم انبار باید یکتا باشد." } }
                 })
                 Tab.MONEY -> FinancePage(finance, balance, onSave = { type, cat, amount, desc ->
-                    scope.launch { try { db.financeDao().insert(FinancialEntryEntity(UUID.randomUUID().toString(), null, type, cat, amount, description = desc)); notice = "سند مالی ثبت شد." } catch (_: Exception) { notice = "ثبت سند مالی ناموفق بود." } }
+                    scope.launch { try { val id = UUID.randomUUID().toString(); val item = FinancialEntryEntity(id, null, type, cat, amount, description = desc); val payload = JSONObject().put("id", id).put("type", type).put("category", cat).put("amount", amount).put("currency", item.currency).put("occurredAtEpochMillis", item.occurredAtEpochMillis).put("description", desc).toString(); db.insertAndEnqueue("financial_entry", id, payload) { db.financeDao().insert(item) }; notice = "سند مالی ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت سند مالی ناموفق بود." } }
                 })
             }
         }
