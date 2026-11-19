@@ -31,13 +31,15 @@ class AgroDatabaseMigrationTest {
             val db = helper.writableDatabase
             AgroDatabase.MIGRATION_3_4.migrate(db)
             AgroDatabase.MIGRATION_4_5.migrate(db)
+            AgroDatabase.MIGRATION_5_6.migrate(db)
             val metadata = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='app_metadata'")
             val inbox = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='sync_inbox'")
-            val legacy = db.query("SELECT id FROM sync_operations WHERE id='legacy-1'")
+            val legacy = db.query("SELECT id, baseVersion FROM sync_operations WHERE id='legacy-1'")
             assertTrue(metadata.moveToFirst())
             assertTrue(inbox.moveToFirst())
             assertTrue(legacy.moveToFirst())
             assertEquals("legacy-1", legacy.getString(0))
+            assertEquals(0, legacy.getInt(1))
             metadata.close(); inbox.close(); legacy.close()
         } finally {
             helper.close()
