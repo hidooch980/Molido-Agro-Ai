@@ -58,6 +58,7 @@ def token_for(user_id: str) -> str:
     signature = b64(hmac.new(JWT_SECRET.encode(), f"{head}.{body}".encode(), hashlib.sha256).digest())
     return f"{head}.{body}.{signature}"
 def current_user(authorization: str | None) -> str:
+    ensure_auth_configured()
     if not authorization or not authorization.startswith("Bearer "): raise HTTPException(401,"Authentication required")
     parts=authorization[7:].split(".")
     if len(parts)!=3: raise HTTPException(401,"Invalid token")
