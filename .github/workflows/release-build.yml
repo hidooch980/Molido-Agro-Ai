@@ -137,7 +137,17 @@ jobs:
             grep -E '^[[:space:]]*[^,]+, ' "$RUNNER_TEMP/keystore-list.txt" | head -n 10 || true
             exit 1
           fi
-          echo "PKCS12 password and alias validated."
+          # PKCS12 private-key password must also unlock the selected alias.
+          if ! keytool -certreq -keystore "$KEYSTORE" -storetype PKCS12 \
+            -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" \
+            -alias "$KEY_ALIAS" -file "$RUNNER_TEMP/molido-signing-check.csr" \
+            >/dev/null 2> "$RUNNER_TEMP/key-password-error.txt"; then
+            echo "::error::The private-key password or alias is invalid for this PKCS12 keystore."
+            sed -n '1,8p' "$RUNNER_TEMP/key-password-error.txt" || true
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/molido-signing-check.csr"
+          echo "PKCS12 store password, private-key password, and alias validated."
           echo "ANDROID_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
 
       - name: Build APKs
