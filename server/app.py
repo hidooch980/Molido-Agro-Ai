@@ -22,6 +22,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, salt BLOB NOT NULL, password_hash BLOB NOT NULL, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS records(user_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, payload TEXT NOT NULL, version INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id,entity_type,entity_id), FOREIGN KEY(user_id) REFERENCES users(id));
         CREATE TABLE IF NOT EXISTS operations(user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, result TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(user_id,idempotency_key), FOREIGN KEY(user_id) REFERENCES users(id));
+        CREATE TABLE IF NOT EXISTS change_log(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, payload TEXT NOT NULL, version INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id));
         """)
 init_db()
 
@@ -95,7 +96,10 @@ def push(body: PushBody, authorization: str | None = Header(default=None)):
             else:
                 next_version=version+1
                 payload=json.dumps(op.payload,separators=(",",":"),ensure_ascii=False)
-                c.execute("INSERT INTO records VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,entity_type,entity_id) DO UPDATE SET payload=excluded.payload,version=excluded.version,updated_at=excluded.updated_at,deleted=excluded.deleted",(uid,op.entityType,op.entityId,payload,next_version,int(time.time()*1000),1 if op.operation=="DELETE" else 0))
+                updated_at = int(time.time() * 1000)
+                deleted = 1 if op.operation == "DELETE" else 0
+                c.execute("INSERT INTO records VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,entity_type,entity_id) DO UPDATE SET payload=excluded.payload,version=excluded.version,updated_at=excluded.updated_at,deleted=excluded.deleted",(uid,op.entityType,op.entityId,payload,next_version,updated_at,deleted))
+                c.execute("INSERT INTO change_log(user_id,entity_type,entity_id,payload,version,updated_at,deleted) VALUES(?,?,?,?,?,?,?)",(uid,op.entityType,op.entityId,payload,next_version,updated_at,deleted))
                 result={"idempotencyKey":op.idempotencyKey,"status":"applied","serverVersion":next_version}
             c.execute("INSERT INTO operations VALUES(?,?,?,?)",(uid,op.idempotencyKey,json.dumps(result),int(time.time())))
             results.append(result)
@@ -105,7 +109,7 @@ def push(body: PushBody, authorization: str | None = Header(default=None)):
 def pull(body: PullBody, authorization: str | None = Header(default=None)):
     uid=current_user(authorization)
     with db() as c:
-        rows=c.execute("SELECT entity_type,entity_id,payload,version,updated_at,deleted FROM records WHERE user_id=? AND updated_at>? ORDER BY updated_at LIMIT ?",(uid,body.cursor,body.limit)).fetchall()
-    changes=[{"entityType":r["entity_type"],"entityId":r["entity_id"],"payload":json.loads(r["payload"]),"version":r["version"],"updatedAt":r["updated_at"],"deleted":bool(r["deleted"])} for r in rows]
-    cursor=max([body.cursor]+[r["updated_at"] for r in rows])
+        rows=c.execute("SELECT id,entity_type,entity_id,payload,version,updated_at,deleted FROM change_log WHERE user_id=? AND id>? ORDER BY id LIMIT ?",(uid,body.cursor,body.limit)).fetchall()
+    changes=[{"cursorId":r["id"],"entityType":r["entity_type"],"entityId":r["entity_id"],"payload":json.loads(r["payload"]),"version":r["version"],"updatedAt":r["updated_at"],"deleted":bool(r["deleted"])} for r in rows]
+    cursor=max([body.cursor]+[r["id"] for r in rows])
     return {"changes":changes,"cursor":cursor}
