@@ -123,12 +123,17 @@ jobs:
             exit 1
           fi
           chmod 600 "$KEYSTORE"
-          if ! keytool -list -keystore "$KEYSTORE" -storetype PKCS12 -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
-            rm -f "$KEYSTORE"
-            echo "::error::P12 validation failed. Check the Base64 keystore, store password, and alias in GitHub Actions secrets."
+          if ! keytool -list -keystore "$KEYSTORE" -storetype PKCS12 -storepass "$KEYSTORE_PASSWORD" > "$RUNNER_TEMP/keystore-list.txt" 2> "$RUNNER_TEMP/keystore-error.txt"; then
+            echo "::error::PKCS12 could not be opened. Check the Base64 keystore and store password."
+            tail -n 6 "$RUNNER_TEMP/keystore-error.txt"
             exit 1
           fi
-          echo "P12 container, store password, and configured alias validated."
+          if ! grep -Fq "$KEY_ALIAS" "$RUNNER_TEMP/keystore-list.txt"; then
+            echo "::error::PKCS12 opened, but the configured alias was not found."
+            grep -E '^[[:space:]]*[^,]+, ' "$RUNNER_TEMP/keystore-list.txt" | head -n 10 || true
+            exit 1
+          fi
+          echo "PKCS12 password and alias validated."
           echo "ANDROID_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
 
       - name: Build APKs
