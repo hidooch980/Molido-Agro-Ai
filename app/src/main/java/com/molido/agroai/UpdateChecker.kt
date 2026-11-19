@@ -51,7 +51,7 @@ fun UpdateCheckerCard() {
         result.onSuccess { candidate ->
             if (candidate.versionCode > BuildConfig.VERSION_CODE) {
                 update = candidate
-                status = "نسخه \${candidate.versionName} آماده دریافت است."
+                status = "نسخه ${candidate.versionName} آماده دریافت است."
             } else status = "برنامه به‌روز است."
         }.onFailure { status = "بررسی به‌روزرسانی در حال حاضر ممکن نیست." }
     }
@@ -69,14 +69,14 @@ fun UpdateCheckerCard() {
                         val result = withContext(Dispatchers.IO) {
                             runCatching {
                                 require(candidate.apkFile.matches(Regex("[A-Za-z0-9._-]+\\.apk")))
-                                val connection = URL("https://github.com/hidooch980/Molido-Agro-Ai/releases/latest/download/\${candidate.apkFile}").openConnection() as HttpURLConnection
+                                val connection = URL("https://github.com/hidooch980/Molido-Agro-Ai/releases/latest/download/${candidate.apkFile}").openConnection() as HttpURLConnection
                                 connection.connectTimeout = 15000
                                 connection.readTimeout = 30000
                                 connection.instanceFollowRedirects = true
                                 try {
                                     check(connection.responseCode == 200)
                                     val dir = File(context.cacheDir, "updates").apply { mkdirs() }
-                                    val file = File(dir, "molido-agro-ai-\${candidate.versionCode}.apk")
+                                    val file = File(dir, "molido-agro-ai-${candidate.versionCode}.apk")
                                     connection.inputStream.use { input -> file.outputStream().use { output -> input.copyTo(output) } }
                                     val digest = MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) }
                                     check(digest.equals(candidate.sha256, ignoreCase = true)) { "checksum mismatch" }
@@ -96,9 +96,9 @@ fun UpdateCheckerCard() {
                 Button(onClick = {
                     val file = downloaded ?: return@Button
                     if (android.os.Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
-                        context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:\${context.packageName}")))
+                        context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")))
                     } else {
-                        val uri = FileProvider.getUriForFile(context, "\${context.packageName}.updates", file)
+                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", file)
                         context.startActivity(Intent(Intent.ACTION_VIEW).apply {
                             setDataAndType(uri, "application/vnd.android.package-archive")
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
