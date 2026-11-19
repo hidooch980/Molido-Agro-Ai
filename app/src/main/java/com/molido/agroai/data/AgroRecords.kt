@@ -74,6 +74,8 @@ data class FinancialEntryEntity(
 
 @Dao
 interface GreenhouseDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(item: GreenhouseEntity)
+    @Query("DELETE FROM greenhouses WHERE id = :id") suspend fun deleteById(id: String)
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(item: GreenhouseEntity)
     @Query("SELECT * FROM greenhouses ORDER BY createdAtEpochMillis DESC") fun observeAll(): Flow<List<GreenhouseEntity>>
     @Query("SELECT COUNT(*) FROM greenhouses WHERE isActive = 1") fun observeActiveCount(): Flow<Int>
@@ -82,6 +84,8 @@ interface GreenhouseDao {
 
 @Dao
 interface CropCycleDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(item: CropCycleEntity)
+    @Query("DELETE FROM crop_cycles WHERE id = :id") suspend fun deleteById(id: String)
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(item: CropCycleEntity)
     @Query("SELECT * FROM crop_cycles ORDER BY startDateEpochMillis DESC") fun observeAll(): Flow<List<CropCycleEntity>>
     @Query("SELECT * FROM crop_cycles WHERE greenhouseId = :greenhouseId AND status = 'ACTIVE'") fun observeActiveForGreenhouse(greenhouseId: String): Flow<List<CropCycleEntity>>
@@ -89,6 +93,8 @@ interface CropCycleDao {
 
 @Dao
 interface FarmActivityDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(item: FarmActivityEntity)
+    @Query("DELETE FROM farm_activities WHERE id = :id") suspend fun deleteById(id: String)
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(item: FarmActivityEntity)
     @Query("SELECT * FROM farm_activities ORDER BY occurredAtEpochMillis DESC LIMIT 300") fun observeRecent(): Flow<List<FarmActivityEntity>>
     @Query("SELECT COUNT(*) FROM farm_activities") fun observeCount(): Flow<Int>
@@ -97,12 +103,16 @@ interface FarmActivityDao {
 
 @Dao
 interface InventoryDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(item: InventoryItemEntity)
+    @Query("DELETE FROM inventory_items WHERE id = :id") suspend fun deleteById(id: String)
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(item: InventoryItemEntity)
     @Query("SELECT * FROM inventory_items ORDER BY name COLLATE NOCASE") fun observeAll(): Flow<List<InventoryItemEntity>>
 }
 
 @Dao
 interface FinanceDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(item: FinancialEntryEntity)
+    @Query("DELETE FROM financial_entries WHERE id = :id") suspend fun deleteById(id: String)
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(item: FinancialEntryEntity)
     @Query("SELECT * FROM financial_entries ORDER BY occurredAtEpochMillis DESC LIMIT 300") fun observeAll(): Flow<List<FinancialEntryEntity>>
     @Query("SELECT COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE -amount END), 0) FROM financial_entries") fun observeBalance(): Flow<Double>
