@@ -14,7 +14,7 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class AgroDatabaseMigrationTest {
     @Test
-    fun migrationsThreeToFiveCreateAccountAndInboxTablesWithoutDroppingRows() {
+    fun migrationsThreeToSixCreateAccountAndInboxTablesWithoutDroppingRows() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "agro-migration-${UUID.randomUUID()}.db"
         val configuration = SupportSQLiteOpenHelper.Configuration.builder(context)
