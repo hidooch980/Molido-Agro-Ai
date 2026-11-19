@@ -1,5 +1,6 @@
 package com.molido.agroai.data
 
+import androidx.room.withTransaction
 import java.util.UUID
 
 object SyncRetryPolicy {
@@ -40,5 +41,37 @@ class SyncOutboxRepository(private val dao: SyncOperationDao) {
     suspend fun retry(id: String, attemptCount: Int, error: String, nowEpochMillis: Long = System.currentTimeMillis()) {
         val safeError = error.take(500)
         dao.scheduleRetry(id, safeError, SyncRetryPolicy.nextAttemptAt(nowEpochMillis, attemptCount))
+    }
+}
+
+
+/**
+ * Persists a local entity and its outbound CREATE event atomically.
+ * The event remains local until a real authenticated sync transport is configured.
+ */
+suspend fun AgroDatabase.insertAndEnqueue(
+    entityType: String,
+    entityId: String,
+    payloadJson: String,
+    insertLocal: suspend () -> Unit
+) {
+    require(entityType.matches(Regex("[a-z_]{1,40}")))
+    require(entityId.isNotBlank() && entityId.length <= 200)
+    require(payloadJson.length <= 1_000_000)
+    withTransaction {
+        insertLocal()
+        val now = System.currentTimeMillis()
+        syncOperationDao().enqueue(
+            SyncOperationEntity(
+                id = UUID.randomUUID().toString(),
+                idempotencyKey = "CREATE:$entityType:$entityId",
+                entityType = entityType,
+                entityId = entityId,
+                operation = "CREATE",
+                payloadJson = payloadJson,
+                createdAtEpochMillis = now,
+                nextAttemptAtEpochMillis = now
+            )
+        )
     }
 }
