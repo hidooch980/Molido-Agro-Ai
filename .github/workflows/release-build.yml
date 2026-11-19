@@ -35,6 +35,8 @@ jobs:
           MOLIDO_JWT_SECRET: ci-only-test-secret-with-more-than-32-characters
           MOLIDO_DB_PATH: /tmp/molido-ci.sqlite3
         run: pytest -q
+      - name: Build self-hosted API container image
+        run: docker build --pull -t molido-agro-sync:ci server
 
   android-instrumented-tests:
     name: Android migration tests on emulator
