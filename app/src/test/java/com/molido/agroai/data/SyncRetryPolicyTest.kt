@@ -18,7 +18,15 @@ class SyncRetryPolicyTest {
         assertEquals(now + 6L * 60L * 60L * 1000L, SyncRetryPolicy.nextAttemptAt(now, 100))
     }
 
-    @Test fun retryTimestampSaturatesInsteadOfOverflowing() {\n        assertEquals(Long.MAX_VALUE, SyncRetryPolicy.nextAttemptAt(Long.MAX_VALUE - 10L, 0))\n    }\n\n    @Test fun negativeAttemptCountIsRejected() {\n        assertThrows(IllegalArgumentException::class.java) { SyncRetryPolicy.nextAttemptAt(0L, -1) }\n    }\n\n    @Test fun retryDelayNeverGoesBackwards() {
+    @Test fun retryTimestampSaturatesInsteadOfOverflowing() {
+        assertEquals(Long.MAX_VALUE, SyncRetryPolicy.nextAttemptAt(Long.MAX_VALUE - 10L, 0))
+    }
+
+    @Test fun negativeAttemptCountIsRejected() {
+        assertThrows(IllegalArgumentException::class.java) { SyncRetryPolicy.nextAttemptAt(0L, -1) }
+    }
+
+    @Test fun retryDelayNeverGoesBackwards() {
         val now = 1_000_000L
         assertTrue(SyncRetryPolicy.nextAttemptAt(now, 0) > now)
     }
