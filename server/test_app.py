@@ -28,3 +28,17 @@ def test_idempotency_and_conflict(tmp_path, monkeypatch):
     assert c.post("/v1/sync/push",json={"operations":[op]},headers=h).json()["results"][0]["status"]=="applied"
     stale={**op,"idempotencyKey":"stale-key","payload":{"quantity":2},"baseVersion":0}
     assert c.post("/v1/sync/push",json={"operations":[stale]},headers=h).json()["results"][0]["status"]=="conflict"
+
+def test_change_log_cursor_paginates_without_skipping_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DB_PATH", tmp_path / "cursor.sqlite3"); app.init_db()
+    client=TestClient(app.app)
+    token=client.post("/v1/auth/register",json={"username":"grower_cursor","password":"strong-password-987"}).json()["accessToken"]
+    headers={"Authorization":f"Bearer {token}"}
+    for n in range(3):
+        op={"idempotencyKey":f"key-{n}","entityType":"greenhouse","entityId":str(n),"operation":"CREATE","payload":{"name":str(n)},"baseVersion":0}
+        assert client.post("/v1/sync/push",json={"operations":[op]},headers=headers).status_code==200
+    first=client.post("/v1/sync/pull",json={"cursor":0,"limit":1},headers=headers).json()
+    second=client.post("/v1/sync/pull",json={"cursor":first["cursor"],"limit":10},headers=headers).json()
+    assert len(first["changes"])==1
+    assert len(second["changes"])==2
+    assert first["changes"][0]["cursorId"] < second["changes"][0]["cursorId"]
