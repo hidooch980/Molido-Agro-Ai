@@ -32,29 +32,30 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.0
+      # GitHub-hosted Ubuntu images include the Android SDK. Reuse the
+      # preinstalled SDK to avoid network-dependent command-line-tools setup.
+      - name: Verify preinstalled Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+          test -n "${ANDROID_HOME:-}"
+          test -d "$ANDROID_HOME/platforms/android-35"
+          test -d "$ANDROID_HOME/build-tools/35.0.0"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          "$ANDROID_HOME/platform-tools/adb" version
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
 
-      - name: Verify toolchain
+      - name: Verify Java and Gradle
         shell: bash
         run: |
           set -euo pipefail
           java -version
           gradle --version
-          sdkmanager --list_installed
-          test -d "$ANDROID_HOME/platforms/android-35"
-          test -d "$ANDROID_HOME/build-tools/35.0.0"
-          test -x "$ANDROID_HOME/platform-tools/adb"
 
       - name: Assemble Debug and Release
         run: gradle --no-daemon --stacktrace :app:assembleDebug :app:assembleRelease
