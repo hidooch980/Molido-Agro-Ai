@@ -78,4 +78,4 @@ suspend fun AgroDatabase.insertAndEnqueue(
         )
     }
     SyncScheduler.runNow(context)
-}}
+}
