@@ -1,6 +1,6 @@
 package com.molido.agroai.data
 
-import android.content.Context\nimport android.content.Context
+import android.content.Context
 import androidx.room.withTransaction
 import java.util.UUID
 
