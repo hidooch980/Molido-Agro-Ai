@@ -1,6 +1,6 @@
 name: Android Release Build
 
-on:
+"on":
   push:
     branches: [main, foundation/android-release-foundation]
     tags: ['v*']
@@ -64,9 +64,9 @@ jobs:
             echo "Signing secrets not configured; non-release builds remain unsigned."
             exit 0
           fi
-          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/molido-release.jks"
-          chmod 600 "$RUNNER_TEMP/molido-release.jks"
-          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/molido-release.jks" >> "$GITHUB_ENV"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/molido-release.p12"
+          chmod 600 "$RUNNER_TEMP/molido-release.p12"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/molido-release.p12" >> "$GITHUB_ENV"
 
       - name: Build APKs
         env:
