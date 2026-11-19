@@ -4,15 +4,15 @@ set -Eeuo pipefail
 REPO="hidooch980/Molido-Agro-Ai"
 ALIAS="molido-release"
 KEY_DIR="${HOME}/.config/molido-agro-signing"
-KEYSTORE="${KEY_DIR}/molido-release.p12"
+KEYSTORE="${MOLIDO_KEYSTORE_PATH:-${KEY_DIR}/molido-release.p12}"
 MODE="${1:-}"
 
 command -v keytool >/dev/null 2>&1 || { echo "ERROR: keytool missing. Install an OpenJDK package in Termux."; exit 1; }
 command -v gh >/dev/null 2>&1 || { echo "ERROR: GitHub CLI (gh) missing."; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "ERROR: Sign in first with: gh auth login"; exit 1; }
 
-mkdir -p "$KEY_DIR"
-chmod 700 "$KEY_DIR"
+mkdir -p "$(dirname "$KEYSTORE")"
+if [[ "$(dirname "$KEYSTORE")" == "$KEY_DIR" ]]; then chmod 700 "$KEY_DIR"; fi
 
 if [[ "$MODE" == "--new-key" ]]; then
   if [[ -e "$KEYSTORE" ]]; then
