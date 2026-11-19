@@ -58,6 +58,7 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
                     else -> dao.scheduleRetry(operation.id, "Unrecognized server response", SyncRetryPolicy.nextAttemptAt(System.currentTimeMillis(), operation.attemptCount))
                 }
             }
+            pullRemoteChanges(base, token, db)
             Result.success()
         } catch (e: java.io.IOException) {
             dueRetry(dao, e)
@@ -70,6 +71,35 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
         }
     }
 
+    private suspend fun pullRemoteChanges(base: String, token: String, db: AgroDatabase) {
+        val prefs = applicationContext.getSharedPreferences("molido_sync_state", Context.MODE_PRIVATE)
+        val cursor = prefs.getLong("remote_cursor", 0L)
+        val body = JSONObject().put("cursor", cursor).put("limit", 100).toString()
+        val response = JSONObject(request("$base/v1/sync/pull", token, body))
+        val changes = response.optJSONArray("changes") ?: JSONArray()
+        val inbox = db.syncInboxDao()
+        val outbox = db.syncOperationDao()
+        var newestCursor = cursor
+        for (index in 0 until changes.length()) {
+            val change = changes.getJSONObject(index)
+            val type = change.getString("entityType")
+            val entityId = change.getString("entityId")
+            val version = change.getInt("version")
+            val payload = change.optJSONObject("payload") ?: JSONObject()
+            val localPending = outbox.pendingForEntity(type, entityId)
+            val state = if (localPending != null) "CONFLICT" else "PENDING_REVIEW"
+            if (localPending != null) outbox.markConflict(localPending.id, "Remote update arrived while local changes were pending")
+            inbox.receive(SyncInboxEntity(
+                id = "$type:$entityId:$version", entityType = type, entityId = entityId,
+                encryptedPayload = SyncPayloadCipher.encrypt(applicationContext, payload.toString()),
+                serverVersion = version, updatedAtEpochMillis = change.optLong("updatedAt"),
+                deleted = change.optBoolean("deleted"), state = state
+            ))
+            newestCursor = maxOf(newestCursor, change.optLong("updatedAt"))
+        }
+        val serverCursor = response.optLong("cursor", newestCursor)
+        check(prefs.edit().putLong("remote_cursor", maxOf(newestCursor, serverCursor)).commit())
+    }
     private suspend fun dueRetry(dao: SyncOperationDao, error: Exception) {
         dao.due(limit = 50).forEach { op ->
             dao.scheduleRetry(op.id, (error.message ?: "Sync error").take(500),
