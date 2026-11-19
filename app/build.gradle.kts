@@ -15,7 +15,8 @@ android {
     namespace = "com.molido.agroai"
     compileSdk = 35
 
-    defaultConfig {\n        buildConfigField("String", "SYNC_BASE_URL", "\"${providers.gradleProperty("SYNC_BASE_URL").orElse("").get()}\"")
+    defaultConfig {
+        buildConfigField("String", "SYNC_BASE_URL", "\"${providers.gradleProperty("SYNC_BASE_URL").orElse("").get()}\"")
         applicationId = "com.molido.agroai"
         minSdk = 26
         targetSdk = 35
