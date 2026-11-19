@@ -57,7 +57,9 @@ jobs:
           api-level: 35
           arch: x86_64
           profile: pixel_2
-          script: gradle --no-daemon :app:connectedDebugAndroidTest
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: gradle --no-daemon --stacktrace :app:connectedDebugAndroidTest
 
   assemble-release:
     name: Assemble Android APK
@@ -103,15 +105,16 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           GITHUB_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
-          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+          if [ -z "${KEYSTORE_BASE64:-}" ] && [ -z "${KEYSTORE_PASSWORD:-}" ] && [ -z "${KEY_ALIAS:-}" ] && [ -z "${KEY_PASSWORD:-}" ]; then
             echo "Signing secrets not configured; non-release builds remain unsigned."
             exit 0
           fi
-          if [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ]; then
-            echo "::error::Signing secrets are incomplete. Configure the keystore password and key alias."
+          if [ -z "${KEYSTORE_BASE64:-}" ] || [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
+            echo "::error::Signing secrets are incomplete. All four Android signing secrets must be configured."
             exit 1
           fi
           KEYSTORE="$RUNNER_TEMP/molido-release.p12"
@@ -122,14 +125,11 @@ jobs:
           chmod 600 "$KEYSTORE"
           if ! keytool -list -keystore "$KEYSTORE" -storetype PKCS12 -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
             rm -f "$KEYSTORE"
-            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-              echo "::error::The P12 file, store password, or key alias is invalid. Signed releases are blocked."
-              exit 1
-            fi
-            echo "::warning::Signing configuration is invalid; continuing with an unsigned CI APK. Version-tag releases remain blocked."
-            exit 0
+            echo "::error::P12 validation failed. Check the Base64 keystore, store password, and alias in GitHub Actions secrets."
+            exit 1
           fi
-          echo "P12 container and configured alias validated."
+          echo "P12 container, store password, and configured alias validated."
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
           echo "ANDROID_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
 
       - name: Build APKs
@@ -175,6 +175,17 @@ jobs:
             molido-agro-ai.apk
             molido-agro-ai-unsigned.apk
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Android test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-reports-${{ github.run_number }}
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+          if-no-files-found: ignore
           retention-days: 14
 
   publish-release:
