@@ -9,19 +9,19 @@
 - Server-side AES-256-GCM encryption for record/change-log payloads; the operator must supply and safely back up `MOLIDO_DATA_KEY`.
 - One-account-per-local-database binding. A second account is blocked to prevent one device's unpartitioned local records from being exposed to another account.
 - Optimistic server version checks, conflict inbox, and explicit user choice to accept server data or re-submit local data against the current server version.
-- Additive Room migrations through version 6; Android instrumentation test covers preservation of an existing outbox row through migrations 3->4->5->6.
+- Additive Room migrations through version 6; Android instrumentation test now exercises the migration chain from version 1 through 6 and checks preservation of a legacy observation and outbox row.
 - Backend tests cover account isolation, idempotency, stale-version conflicts and change-log pagination.
 - Transactional helpers exist for CREATE, UPDATE and DELETE/tombstone outbox operations.
 
 ## Still required before production
 
-- The current five create forms are connected to the outbox. Transactional update/delete/tombstone helpers exist, but edit/delete actions are not yet wired into every screen; do not claim complete CRUD.
+- Create, edit and delete controls for all five record categories are connected to transactional outbox operations. Delete is represented as a versioned server tombstone.
 - Inbound changes are staged and resolved through the conflict panel for supported record types. They are not silently auto-applied.
 - Main Room business tables remain ordinary Room/SQLite storage. Android Keystore encryption currently protects session material and sync payloads, not the entire local database or every sensitive field. Full database-at-rest encryption and key-loss recovery remain open.
-- The backend is source-only and has not been deployed. Set a strong unique `MOLIDO_JWT_SECRET`, persistent database path, TLS reverse proxy, firewall, backups and monitoring before connecting devices.
+- The backend is source-only and has not been deployed. Docker image build is included in CI. Set a strong unique `MOLIDO_JWT_SECRET`, persistent database path, TLS reverse proxy, firewall, backups and monitoring before connecting devices.
 - Backend rate limiting, account recovery, refresh/revocation, audit logs, admin roles and hardened production deployment are not implemented.
 - Local database is bound to one account rather than partitioned by ownerId. Account switching requires a reviewed export/reset flow; do not manually delete the database.
-- Emulator instrumentation is not a substitute for testing on a physical Android device.
+- Emulator instrumentation is not a substitute for testing on a physical Android device; see `docs/PHYSICAL_DEVICE_ACCEPTANCE.md`.
 - A signed APK is not approved until the configured keystore is validated, apksigner succeeds, signer fingerprint continuity is checked and an upgrade install is tested.
 
 ## Deployment/configuration
