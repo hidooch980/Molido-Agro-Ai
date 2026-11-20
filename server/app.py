@@ -138,3 +138,7 @@ def pull(body: PullBody, authorization: str | None = Header(default=None)):
     changes=[{"cursorId":r["id"],"entityType":r["entity_type"],"entityId":r["entity_id"],"payload":decrypt_payload(r["payload"]),"version":r["version"],"updatedAt":r["updated_at"],"deleted":bool(r["deleted"])} for r in rows]
     cursor=max([body.cursor]+[r["id"] for r in rows])
     return {"changes":changes,"cursor":cursor}
+
+# Sensor endpoints are kept in a separate module to isolate the greenhouse telemetry API.
+from sensor_api import register_sensor_routes
+register_sensor_routes(app, db, current_user, encrypt_payload, decrypt_payload)
