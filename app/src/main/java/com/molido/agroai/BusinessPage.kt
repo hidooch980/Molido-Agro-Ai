@@ -1,8 +1,6 @@
 package com.molido.agroai
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -10,16 +8,11 @@ import androidx.compose.ui.unit.dp
 import com.molido.agroai.data.BusinessRecordEntity
 
 private val businessTypes = listOf(
-    "customer" to "مشتری",
-    "supplier" to "تأمین‌کننده",
-    "crm_lead" to "فرصت فروش",
-    "crm_activity" to "پیگیری مشتری",
-    "support_ticket" to "درخواست پشتیبانی",
-    "product" to "محصول",
-    "sales_order" to "سفارش فروش",
-    "purchase_order" to "سفارش خرید",
-    "harvest_batch" to "بچ برداشت",
-    "journal_entry" to "سند حسابداری",
+    "customer" to "مشتری", "supplier" to "تأمین‌کننده",
+    "crm_lead" to "فرصت فروش", "crm_activity" to "پیگیری مشتری",
+    "support_ticket" to "درخواست پشتیبانی", "product" to "محصول",
+    "sales_order" to "سفارش فروش", "purchase_order" to "سفارش خرید",
+    "harvest_batch" to "بچ برداشت", "journal_entry" to "سند حسابداری",
     "settlement" to "تسویه"
 )
 
@@ -34,16 +27,13 @@ fun BusinessPage(records: List<BusinessRecordEntity>, onSave: (String, String, S
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("مدیریت یکپارچه CRM و ERP", style = MaterialTheme.typography.titleLarge)
         Text("ثبت آفلاین فعال است؛ اطلاعات ابتدا روی دستگاه ذخیره و سپس در صف همگام‌سازی قرار می‌گیرد.", style = MaterialTheme.typography.bodySmall)
-        ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
-            OutlinedTextField(
-                value = selectedLabel, onValueChange = {}, readOnly = true,
-                label = { Text("نوع رکورد") },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                modifier = Modifier.menuAnchor().fillMaxWidth()
-            )
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                businessTypes.forEach { (key, label) ->
-                    DropdownMenuItem(text = { Text(label) }, onClick = { selectedType = key; expanded = false })
+        Box {
+            OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("نوع رکورد: " + selectedLabel)
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                businessTypes.forEach { pair ->
+                    DropdownMenuItem(text = { Text(pair.second) }, onClick = { selectedType = pair.first; expanded = false })
                 }
             }
         }
@@ -60,8 +50,8 @@ fun BusinessPage(records: List<BusinessRecordEntity>, onSave: (String, String, S
         ) { Text("ذخیره محلی و افزودن به صف همگام‌سازی") }
         Text("سوابق ثبت‌شده (" + records.size + ")", style = MaterialTheme.typography.titleMedium)
         if (records.isEmpty()) Text("هنوز رکوردی ثبت نشده است.")
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(7.dp), modifier = Modifier.heightIn(max = 520.dp)) {
-            items(records, key = { it.id }) { item ->
+        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            records.take(100).forEach { item ->
                 val label = businessTypes.firstOrNull { it.first == item.recordType }?.second ?: item.recordType
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
