@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -10,8 +12,8 @@ val signingStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
 val signingKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
 val hasReleaseSigning = listOf(signingStoreFile, signingStorePassword, signingKeyAlias).all { !it.isNullOrBlank() }
 
-val versionProperties = java.util.Properties().apply {
-    rootProject.file("version.properties").inputStream().use { load(it) }
+val versionProperties = Properties().apply {
+    rootProject.file("version.properties").inputStream().use { input -> load(input) }
 }
 val baseVersionName = versionProperties.getProperty("VERSION_NAME", "0.1.0")
 val baseVersionCode = versionProperties.getProperty("VERSION_CODE", "1").toInt()
