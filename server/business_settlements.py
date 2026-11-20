@@ -10,10 +10,10 @@ from pydantic import BaseModel, Field
 
 
 class SettlementInput(BaseModel):
-    idempotencyKey: str = Field(min_length=8, max_length=200)
+    idempotencyKey: str = Field(default_factory=lambda: uuid.uuid4().hex, min_length=8, max_length=200)
     orderId: str = Field(min_length=1, max_length=200)
     amount: float = Field(gt=0, allow_inf_nan=False)
-    method: Literal["CASH", "BANK"] = "BANK"
+    method: Literal["CASH", "BANK", "BANK_TRANSFER", "CARD", "OTHER"] = "BANK"
     reference: str | None = Field(default=None, max_length=200)
 
 
@@ -61,7 +61,7 @@ def register_settlement_routes(app, db, current_user, encrypt_payload):
             if not order:
                 raise HTTPException(404, "Order not found")
             kind = order["order_type"]
-            if order["status"] != ("DELIVERED" if kind == "SALES" else "RECEIVED"):
+            if order["status"] not in (("DELIVERED", "FULFILLED") if kind == "SALES" else ("RECEIVED", "FULFILLED")):
                 raise HTTPException(409, "Order must be delivered or received before settlement")
             paid = c.execute(
                 "SELECT COALESCE(SUM(amount),0) amount FROM business_settlements WHERE user_id=? AND order_id=?",
