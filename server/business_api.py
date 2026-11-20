@@ -206,6 +206,7 @@ def register_business_routes(app, db, current_user, encrypt_payload, decrypt_pay
         now = int(time.time() * 1000)
         with db() as connection:
             ensure_tables(connection)
+            connection.execute("BEGIN IMMEDIATE")
             duplicate = connection.execute(
                 "SELECT id FROM inventory_movements WHERE user_id=? AND idempotency_key=?",
                 (uid, body.idempotencyKey),
