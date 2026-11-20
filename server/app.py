@@ -156,3 +156,7 @@ register_business_workflow_routes(app, db, current_user, encrypt_payload, decryp
 
 from business_settlements import register_settlement_routes
 register_settlement_routes(app, db, current_user, encrypt_payload)
+
+
+from business_approval_ledger import register_approval_ledger_routes
+register_approval_ledger_routes(app, db, current_user, encrypt_payload, decrypt_payload)
