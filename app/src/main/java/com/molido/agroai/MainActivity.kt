@@ -198,7 +198,7 @@ private fun tabIcon(t: Tab) = when (t) { Tab.HOME -> "âŒ‚"; Tab.GREENHOUSE -> "ð
 
 @Composable
 private fun Page(content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp), content = content)
+    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp), content = content)
 }
 
 @Composable
