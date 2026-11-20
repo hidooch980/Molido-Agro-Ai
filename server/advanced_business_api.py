@@ -38,6 +38,15 @@ class TicketInput(BaseModel):
     category: str = Field(default="GENERAL", max_length=60)
 
 
+class LeadStageInput(BaseModel):
+    stage: Literal["NEW", "QUALIFIED", "PROPOSAL", "WON", "LOST"]
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class TicketStatusInput(BaseModel):
+    status: Literal["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED"]
+
+
 class OrderTransitionInput(BaseModel):
     action: Literal["CONFIRM", "FULFILL", "CANCEL"]
 
@@ -182,6 +191,30 @@ def register_advanced_business_routes(app, db, current_user, encrypt_payload, de
                       (uid,item_id,body.leadId,body.customerId,encrypt_payload(body.model_dump()),now))
         return {"id":item_id,**body.model_dump(),"createdAtEpochMillis":now}
 
+    @app.get("/v1/crm/activities")
+    def list_activities(leadId: str | None=None, customerId: str | None=None,
+                        authorization: str | None=Header(default=None)):
+        uid=uid_for(authorization)
+        with db() as c:
+            setup(c,uid)
+            rows=c.execute("""SELECT activity_id,payload,created_at FROM crm_activities
+                WHERE user_id=? AND (? IS NULL OR lead_id=?) AND (? IS NULL OR customer_id=?)
+                ORDER BY created_at DESC LIMIT 500""",(uid,leadId,leadId,customerId,customerId)).fetchall()
+        return {"items":[{"id":r["activity_id"],**decrypt_payload(r["payload"]),"createdAtEpochMillis":r["created_at"]} for r in rows]}
+
+    @app.post("/v1/crm/leads/{lead_id}/stage")
+    def update_lead_stage(lead_id: str, body: LeadStageInput, authorization: str | None=Header(default=None)):
+        uid=uid_for(authorization); now=int(time.time()*1000)
+        with db() as c:
+            setup(c,uid)
+            row=c.execute("SELECT payload FROM crm_leads WHERE user_id=? AND lead_id=?",(uid,lead_id)).fetchone()
+            if not row: raise HTTPException(404,"Lead not found")
+            payload=decrypt_payload(row["payload"]); payload["stage"]=body.stage
+            if body.notes is not None: payload["notes"]=body.notes
+            c.execute("UPDATE crm_leads SET stage=?,payload=?,updated_at=? WHERE user_id=? AND lead_id=?",
+                      (body.stage,encrypt_payload(payload),now,uid,lead_id))
+        return {"id":lead_id,"stage":body.stage,"updatedAtEpochMillis":now}
+
     @app.post("/v1/crm/tickets")
     def create_ticket(body: TicketInput, authorization: str | None=Header(default=None)):
         uid=uid_for(authorization); now=int(time.time()*1000); ticket_id=uuid.uuid4().hex
@@ -190,6 +223,16 @@ def register_advanced_business_routes(app, db, current_user, encrypt_payload, de
             c.execute("INSERT INTO crm_tickets VALUES(?,?,?,?,?,?,?)",
                       (uid,ticket_id,body.customerId,"OPEN",body.priority,encrypt_payload(body.model_dump()),now))
         return {"id":ticket_id,"status":"OPEN",**body.model_dump(),"createdAtEpochMillis":now}
+
+    @app.post("/v1/crm/tickets/{ticket_id}/status")
+    def update_ticket_status(ticket_id: str, body: TicketStatusInput, authorization: str | None=Header(default=None)):
+        uid=uid_for(authorization)
+        with db() as c:
+            setup(c,uid)
+            changed=c.execute("UPDATE crm_tickets SET status=? WHERE user_id=? AND ticket_id=?",
+                              (body.status,uid,ticket_id)).rowcount
+            if not changed: raise HTTPException(404,"Ticket not found")
+        return {"id":ticket_id,"status":body.status}
 
     @app.get("/v1/crm/tickets")
     def list_tickets(status: str | None=None, authorization: str | None=Header(default=None)):
