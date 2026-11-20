@@ -131,7 +131,10 @@ def test_sensor_reading_history_threshold_alerts_and_idempotency(tmp_path, monke
 
 def test_sensor_data_is_account_isolated_and_empty_status_is_explicit(tmp_path, monkeypatch):
     client, owner_headers = _sensor_client(tmp_path, monkeypatch, "sensor_owner_a")
-    _, other_headers = _sensor_client(tmp_path, monkeypatch, "sensor_owner_b")
+    second = client.post("/v1/auth/register", json={
+        "username": "sensor_owner_b", "password": "strong-password-sensor-456"
+    })
+    other_headers = {"Authorization": f"Bearer {second.json()['accessToken']}"}
     status = client.get("/v1/sensors/greenhouses/gh-private/status", headers=other_headers).json()
     assert status["status"] == "NO_DATA"
     assert status["isRealMeasurement"] is False
