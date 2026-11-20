@@ -1,6 +1,8 @@
 package com.molido.agroai
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,10 +22,13 @@ import java.util.UUID
 
 private val businessKinds = listOf(
     "CUSTOMER" to "مشتری",
+    "SUPPLIER" to "تأمین‌کننده",
     "PRODUCT" to "محصول",
     "OPPORTUNITY" to "فرصت فروش",
     "TICKET" to "درخواست پشتیبانی",
-    "SALES_ORDER" to "سفارش فروش"
+    "SALES_ORDER" to "سفارش فروش",
+    "PURCHASE_ORDER" to "سفارش خرید",
+    "HARVEST" to "برداشت"
 )
 
 @Composable
@@ -37,6 +42,8 @@ fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
     var unit by remember { mutableStateOf("kg") }
     var customerId by remember { mutableStateOf("") }
     var productId by remember { mutableStateOf("") }
+    var greenhouseId by remember { mutableStateOf("") }
+    var cropCycleId by remember { mutableStateOf("") }
     var subject by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var quantity by remember { mutableStateOf("1") }
@@ -89,7 +96,7 @@ fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
                 Text("•", color = MaterialTheme.colorScheme.primary)
                 Text("تعارض: " + records.count { it.syncState == "CONFLICT" }, style = MaterialTheme.typography.labelLarge)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 businessKinds.forEach { (key, title) ->
                     FilterChip(selected = selected == key, onClick = { selected = key }, label = { Text(title) })
                 }
@@ -102,6 +109,14 @@ fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
                         if (name.trim().length < 2) onNotice("نام مشتری را وارد کنید.")
                         else persist("customer", JSONObject().put("name", name.trim()).put("phone", phone.trim()))
                     }, modifier = Modifier.fillMaxWidth()) { Text("ثبت مشتری") }
+                }
+                "SUPPLIER" -> {
+                    OutlinedTextField(name, { name = it }, label = { Text("نام تأمین‌کننده") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(phone, { phone = it }, label = { Text("شماره تماس") }, modifier = Modifier.fillMaxWidth())
+                    Button(onClick = {
+                        if (name.trim().length < 2) onNotice("نام تأمین‌کننده را وارد کنید.")
+                        else persist("supplier", JSONObject().put("name", name.trim()).put("phone", phone.trim()))
+                    }, modifier = Modifier.fillMaxWidth()) { Text("ثبت تأمین‌کننده") }
                 }
                 "PRODUCT" -> {
                     OutlinedTextField(name, { name = it }, label = { Text("نام محصول / کالا") }, modifier = Modifier.fillMaxWidth())
@@ -131,6 +146,28 @@ fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
                         if (customerId.isBlank() || subject.trim().length < 2 || description.trim().length < 2) onNotice("اطلاعات درخواست پشتیبانی کامل نیست.")
                         else persist("support_ticket", JSONObject().put("customerId", customerId.trim()).put("subject", subject.trim()).put("description", description.trim()).put("priority", "NORMAL").put("status", "OPEN"))
                     }, modifier = Modifier.fillMaxWidth()) { Text("ثبت درخواست پشتیبانی") }
+                }
+                "PURCHASE_ORDER" -> {
+                    OutlinedTextField(customerId, { customerId = it }, label = { Text("شناسه تأمین‌کننده") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(productId, { productId = it }, label = { Text("شناسه محصول") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(quantity, { quantity = it }, label = { Text("مقدار") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(price, { price = it }, label = { Text("قیمت واحد خرید") }, modifier = Modifier.fillMaxWidth())
+                    Button(onClick = {
+                        val q = quantity.toDoubleOrNull(); val p = price.toDoubleOrNull()
+                        if (customerId.isBlank() || productId.isBlank() || q == null || q <= 0 || p == null || p < 0) onNotice("شناسه تأمین‌کننده، محصول، مقدار و قیمت را بررسی کنید.")
+                        else persist("purchase_order", JSONObject().put("partyId", customerId.trim()).put("status", "DRAFT").put("lines", JSONArray().put(JSONObject().put("productId", productId.trim()).put("quantity", q).put("unitPrice", p))))
+                    }, modifier = Modifier.fillMaxWidth()) { Text("ثبت پیش‌نویس سفارش خرید") }
+                }
+                "HARVEST" -> {
+                    OutlinedTextField(greenhouseId, { greenhouseId = it }, label = { Text("شناسه گلخانه") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(cropCycleId, { cropCycleId = it }, label = { Text("شناسه دوره کشت") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(productId, { productId = it }, label = { Text("شناسه محصول انبار") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(quantity, { quantity = it }, label = { Text("مقدار برداشت") }, modifier = Modifier.fillMaxWidth())
+                    Button(onClick = {
+                        val q = quantity.toDoubleOrNull()
+                        if (greenhouseId.isBlank() || cropCycleId.isBlank() || productId.isBlank() || q == null || q <= 0) onNotice("شناسه گلخانه، دوره کشت، محصول و مقدار برداشت را بررسی کنید.")
+                        else persist("harvest", JSONObject().put("greenhouseId", greenhouseId.trim()).put("cropCycleId", cropCycleId.trim()).put("productId", productId.trim()).put("warehouseId", "main").put("quantity", q).put("unit", unit))
+                    }, modifier = Modifier.fillMaxWidth()) { Text("ثبت برداشت محلی") }
                 }
                 "SALES_ORDER" -> {
                     OutlinedTextField(customerId, { customerId = it }, label = { Text("شناسه مشتری") }, modifier = Modifier.fillMaxWidth())
