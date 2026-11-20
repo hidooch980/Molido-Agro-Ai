@@ -46,9 +46,19 @@ agro.home.arpa {
 5. هر ماه بازیابی آزمایشی روی ماشین جداگانه و بررسی `PRAGMA integrity_check` انجام شود.
 6. کلیدهای رمزگذاری و امضای بکاپ باید جداگانه و امن نگهداری شوند؛ بکاپ بدون کلید بازیابی معتبر نیست.
 
+نمونه اجرای پشتیبان‌گیری از داخل محیط سرور (کلید بکاپ مستقل و ۳۲ بایتی Base64 لازم است):
+
+\`\`\`bash
+export MOLIDO_BACKUP_KEY='BASE64_32_BYTE_BACKUP_KEY'
+python server/backup_db.py /secure-backups/molido-$(date -u +%Y%m%dT%H%M%SZ).sqlite3.enc
+\`\`\`
+
+کلید نمونه بالا placeholder است و نباید عیناً استفاده شود. کلید واقعی را از مولد امن تولید و جدا از فایل backup نگهداری کنید.
+
 ## بازیابی
 
 - ابتدا سرویس API و پل MQTT متوقف شوند.
+- با `MOLIDO_BACKUP_KEY` صحیح، اسکریپت `python server/restore_db.py /secure-backups/backup.sqlite3.enc` اجرا شود؛ اسکریپت قبل از جایگزینی، احراز اصالت AES-GCM و integrity check را انجام می‌دهد.
 - آخرین backup رمزگشایی‌شده در مسیر staging قرار گیرد.
 - قبل از جایگزینی دیتابیس فعال، `PRAGMA integrity_check` باید `ok` برگرداند.
 - فایل فعال به‌صورت اتمیک جایگزین و مالکیت/مجوزهای فایل بررسی شود.
