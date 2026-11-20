@@ -10,6 +10,25 @@ val signingStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
 val signingKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
 val hasReleaseSigning = listOf(signingStoreFile, signingStorePassword, signingKeyAlias).all { !it.isNullOrBlank() }
 
+val validateReleaseSigning = tasks.register("validateReleaseSigning") {
+    group = "verification"
+    description = "Require the configured PKCS12 key before packaging a release APK."
+    doLast {
+        check(hasReleaseSigning) {
+            "A single PKCS12 release signing key is required for every release APK."
+        }
+        check(file(signingStoreFile!!).isFile) {
+            "The configured PKCS12 release signing keystore does not exist."
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "validateSigningRelease") {
+        dependsOn(validateReleaseSigning)
+    }
+}
+
 android {
     namespace = "com.molido.agroai"
     compileSdk = 35
@@ -41,8 +60,9 @@ android {
 
     buildTypes {
         release {
-            check(hasReleaseSigning) { "A single PKCS12 release signing key is required for every release APK." }
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
