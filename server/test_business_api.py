@@ -1,4 +1,5 @@
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 
@@ -275,3 +276,35 @@ def test_crm_lead_and_ticket_are_isolated_and_statuses_transition():
     assert stage.status_code == 200 and stage.json()["stage"] == "PROPOSAL"
     status = client.post(f"/v1/crm/tickets/{ticket['id']}/status", headers=owner, json={"status": "RESOLVED"})
     assert status.status_code == 200 and status.json()["status"] == "RESOLVED"
+
+
+def test_concurrent_sales_reservations_cannot_oversell_stock():
+    owner = account("parallelreserve")
+    customer = create_customer(owner)
+    product = create_product(owner)
+    client.post("/v1/erp/inventory/movements", headers=owner, json={
+        "idempotencyKey": "parallel-stock-001", "productId": product["id"],
+        "warehouseId": "main", "movementType": "RECEIPT", "quantity": 5
+    })
+    orders = []
+    for index in range(2):
+        order = client.post("/v1/erp/sales/orders", headers=owner, json={
+            "partyId": customer["id"],
+            "lines": [{"productId": product["id"], "quantity": 4, "unitPrice": 100}]
+        })
+        assert order.status_code == 200
+        orders.append(order.json()["id"])
+
+    def confirm(order_id):
+        from fastapi.testclient import TestClient
+        with TestClient(app) as isolated_client:
+            return isolated_client.post(
+                f"/v1/erp/orders/{order_id}/transition",
+                headers=owner, json={"action": "CONFIRM"}
+            ).status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = list(pool.map(confirm, orders))
+    assert sorted(statuses) == [200, 409]
+    reservations = client.get("/v1/erp/inventory/balances?warehouseId=main", headers=owner).json()["items"]
+    assert reservations[0]["quantity"] == 5
