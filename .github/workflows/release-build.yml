@@ -37,6 +37,43 @@ jobs:
         run: pytest -q
       - name: Build self-hosted API container image
         run: docker build --pull -t molido-agro-sync:ci server
+      - name: Smoke-test self-hosted API container and sensor routes
+        shell: bash
+        env:
+          MOLIDO_JWT_SECRET: ci-only-test-secret-with-more-than-32-characters
+          MOLIDO_DATA_KEY: eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg
+        run: |
+          set -Eeuo pipefail
+          docker run -d --rm --name molido-agro-api-ci \
+            -e MOLIDO_JWT_SECRET="$MOLIDO_JWT_SECRET" \
+            -e MOLIDO_DATA_KEY="$MOLIDO_DATA_KEY" \
+            -p 127.0.0.1:18080:8080 molido-agro-sync:ci
+          cleanup() { docker stop molido-agro-api-ci >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          ready=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18080/health >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
+          python - <<'PY'
+          import json, urllib.request
+          with urllib.request.urlopen("http://127.0.0.1:18080/openapi.json", timeout=5) as response:
+              schema = json.load(response)
+          required = {
+              "/v1/sensors/readings",
+              "/v1/sensors/greenhouses/{greenhouse_id}/readings",
+              "/v1/sensors/greenhouses/{greenhouse_id}/thresholds",
+              "/v1/sensors/greenhouses/{greenhouse_id}/status",
+          }
+          missing = required.difference(schema.get("paths", {}))
+          if missing:
+              raise SystemExit(f"Sensor routes missing from container: {sorted(missing)}")
+          print("Container health and all sensor routes verified.")
+          PY
 
   android-instrumented-tests:
     name: Android migration tests on emulator
