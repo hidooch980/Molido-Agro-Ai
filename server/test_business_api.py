@@ -238,3 +238,40 @@ def test_sales_reservation_prevents_overselling_and_releases_on_cancel():
     assert blocked.status_code == 409
     cancelled = client.post(f"/v1/erp/orders/{order['id']}/transition", headers=owner, json={"action": "CANCEL"})
     assert cancelled.status_code == 200 and cancelled.json()["status"] == "CANCELLED"
+
+
+def test_harvest_batch_posts_inventory_against_synced_greenhouse_and_crop_cycle():
+    owner = account("harvestowner")
+    product = create_product(owner)
+    push = client.post("/v1/sync/push", headers=owner, json={"operations": [
+        {"idempotencyKey": "gh-sync-harvest-001", "entityType": "greenhouse", "entityId": "gh-h1",
+         "operation": "CREATE", "payload": {"id": "gh-h1", "name": "Greenhouse 1"}, "baseVersion": 0},
+        {"idempotencyKey": "cycle-sync-harvest-001", "entityType": "crop_cycle", "entityId": "cycle-h1",
+         "operation": "CREATE", "payload": {"id": "cycle-h1", "greenhouseId": "gh-h1"}, "baseVersion": 0}
+    ]})
+    assert push.status_code == 200, push.text
+    harvested = client.post("/v1/erp/harvest", headers=owner, json={
+        "greenhouseId": "gh-h1", "cropCycleId": "cycle-h1",
+        "productId": product["id"], "warehouseId": "main",
+        "quantity": 24.5, "unit": "kg", "qualityGrade": "A"
+    })
+    assert harvested.status_code == 200, harvested.text
+    assert harvested.json()["inventoryUpdated"] is True
+    balances = client.get("/v1/erp/inventory/balances?warehouseId=main", headers=owner).json()["items"]
+    assert balances[0]["quantity"] == 24.5
+
+
+def test_crm_lead_and_ticket_are_isolated_and_statuses_transition():
+    owner = account("crmstatusowner")
+    other = account("crmstatusother")
+    lead = client.post("/v1/crm/leads", headers=owner, json={"title": "Lead One"}).json()
+    ticket = client.post("/v1/crm/tickets", headers=owner, json={
+        "subject": "Damaged packaging", "description": "Customer reports damaged packaging",
+        "priority": "URGENT"
+    }).json()
+    assert client.get("/v1/crm/leads", headers=other).json()["items"] == []
+    assert client.get("/v1/crm/tickets", headers=other).json()["items"] == []
+    stage = client.post(f"/v1/crm/leads/{lead['id']}/stage", headers=owner, json={"stage": "PROPOSAL"})
+    assert stage.status_code == 200 and stage.json()["stage"] == "PROPOSAL"
+    status = client.post(f"/v1/crm/tickets/{ticket['id']}/status", headers=owner, json={"status": "RESOLVED"})
+    assert status.status_code == 200 and status.json()["status"] == "RESOLVED"
