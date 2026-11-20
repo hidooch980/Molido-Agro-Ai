@@ -2,7 +2,7 @@ name: Android Release Build
 
 on:
   push:
-    branches: [main, foundation/android-release-foundation]
+    branches: [main]
     tags: ['v*']
   pull_request:
     branches: [main]
@@ -61,7 +61,9 @@ jobs:
           emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim
           emulator-boot-timeout: 600
           disable-animations: true
-          script: timeout --signal=TERM --kill-after=30s 50m gradle --no-daemon --stacktrace :app:connectedDebugAndroidTest
+          script: |
+            set -o pipefail
+            timeout --signal=TERM --kill-after=30s 50m gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest 2>&1 | tee "$RUNNER_TEMP/molido-instrumentation-gradle.log"
 
       - name: Capture emulator diagnostics
         if: always()
@@ -81,6 +83,7 @@ jobs:
             ${{ runner.temp }}/molido-emulator-logcat.txt
             ${{ runner.temp }}/molido-emulator-processes.txt
             ${{ runner.temp }}/molido-adb-devices.txt
+            ${{ runner.temp }}/molido-instrumentation-gradle.log
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/
           if-no-files-found: ignore
