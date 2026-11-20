@@ -145,13 +145,48 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
         if not c.execute("SELECT 1 FROM business_parties WHERE user_id=? AND party_type='CUSTOMER' AND party_id=?", (user, party_id)).fetchone():
             raise HTTPException(404, "Customer not found in this account")
 
+    @app.post("/v1/crm/leads")
+    def create_lead(body: LeadInput, authorization: str | None = Header(default=None)):
+        user=uid(authorization); now=int(time.time()*1000); ident=uuid.uuid4().hex
+        with db() as c:
+            init(c)
+            if body.customerId: require_party(c,user,body.customerId)
+            c.execute("INSERT INTO crm_leads VALUES(?,?,?,?,?,?,?,?,?)",
+                      (user,ident,body.customerId,body.stage,body.estimatedValue,body.currency,
+                       encrypt_payload(body.model_dump()),now,now))
+        return {"id":ident,**body.model_dump(),"createdAtEpochMillis":now}
+
+    @app.get("/v1/crm/leads")
+    def list_leads(stage: str | None = None, authorization: str | None = Header(default=None)):
+        user=uid(authorization)
+        with db() as c:
+            init(c)
+            rows=c.execute("SELECT lead_id,payload,created_at FROM crm_leads WHERE user_id=? AND (? IS NULL OR stage=?) ORDER BY updated_at DESC LIMIT 500",(user,stage,stage)).fetchall()
+        return {"items":[{"id":r["lead_id"],**decrypt_payload(r["payload"]),"createdAtEpochMillis":r["created_at"]} for r in rows]}
+
+    @app.post("/v1/crm/leads/{lead_id}/stage")
+    def update_lead_stage(lead_id: str, body: LeadStageInput, authorization: str | None = Header(default=None)):
+        user=uid(authorization); now=int(time.time()*1000)
+        with db() as c:
+            init(c)
+            row=c.execute("SELECT payload FROM crm_leads WHERE user_id=? AND lead_id=?",(user,lead_id)).fetchone()
+            if not row: raise HTTPException(404,"Lead not found")
+            payload=decrypt_payload(row["payload"]); payload["stage"]=body.stage
+            if body.notes is not None: payload["notes"]=body.notes
+            c.execute("UPDATE crm_leads SET stage=?,payload=?,updated_at=? WHERE user_id=? AND lead_id=?",(body.stage,encrypt_payload(payload),now,user,lead_id))
+        return {"id":lead_id,"stage":body.stage,"updatedAtEpochMillis":now}
+
     @app.post("/v1/crm/activities")
     def create_activity(body: CRMActivityInput, authorization: str | None = Header(default=None)):
         user = uid(authorization); now = int(time.time() * 1000); ident = uuid.uuid4().hex
         with db() as c:
-            init(c); require_party(c,user,body.customerId)
-            c.execute("INSERT INTO crm_activities VALUES(?,?,?,?,?,?,?,?,?)",
-                (user,ident,body.customerId,body.activityType,body.subject,encrypt_payload(body.model_dump()),body.dueAtEpochMillis,"OPEN",now))
+            init(c)
+            if body.customerId: require_party(c,user,body.customerId)
+            if body.leadId and not c.execute("SELECT 1 FROM crm_leads WHERE user_id=? AND lead_id=?",(user,body.leadId)).fetchone():
+                raise HTTPException(404,"Lead not found in this account")
+            if not body.customerId and not body.leadId: raise HTTPException(422,"Activity must be linked to a customer or lead")
+            c.execute("INSERT INTO crm_activities VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (user,ident,body.customerId,body.leadId,body.activityType,body.subject,encrypt_payload(body.model_dump()),body.dueAtEpochMillis,"OPEN",now))
         return {"id":ident,"status":"OPEN","createdAtEpochMillis":now,**body.model_dump()}
 
     @app.get("/v1/crm/activities")
