@@ -72,7 +72,7 @@ private fun AgroApp() {
             }
         }
     }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
             Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
                 Text("مولیدو آگرو", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text("مدیریت هوشمند کشاورزی و گلخانه", color = Muted)
@@ -151,6 +151,10 @@ private fun AuthPanel(context: android.content.Context, onAuthChanged: () -> Uni
         OutlinedTextField(password, { password = it }, label = { Text("گذرواژه (حداقل ۱۲ نویسه)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(enabled = !busy, onClick = {
+                when {
+                    !user.trim().matches(Regex("[A-Za-z0-9_.-]{3,64}")) -> status = "نام کاربری باید ۳ تا ۶۴ نویسه و شامل حروف انگلیسی، عدد، نقطه، خط تیره یا زیرخط باشد."
+                    password.length !in 12..256 -> status = "گذرواژه باید حداقل ۱۲ نویسه داشته باشد."
+                    else -> {
                 busy = true
                 scope.launch {
                     try {
@@ -161,8 +165,14 @@ private fun AuthPanel(context: android.content.Context, onAuthChanged: () -> Uni
                     } catch (e: Exception) { status = e.message ?: "ورود ناموفق بود." }
                     busy = false
                 }
+                    }
+                }
             }) { Text("ورود") }
             OutlinedButton(enabled = !busy, onClick = {
+                when {
+                    !user.trim().matches(Regex("[A-Za-z0-9_.-]{3,64}")) -> status = "نام کاربری باید ۳ تا ۶۴ نویسه و شامل حروف انگلیسی، عدد، نقطه، خط تیره یا زیرخط باشد."
+                    password.length !in 12..256 -> status = "گذرواژه باید حداقل ۱۲ نویسه داشته باشد."
+                    else -> {
                 busy = true
                 scope.launch {
                     try {
@@ -172,6 +182,8 @@ private fun AuthPanel(context: android.content.Context, onAuthChanged: () -> Uni
                         onAuthChanged()
                     } catch (e: Exception) { status = e.message ?: "ثبت‌نام ناموفق بود." }
                     busy = false
+                }
+                    }
                 }
             }) { Text("ساخت حساب") }
             if (session.userId() != null) {
