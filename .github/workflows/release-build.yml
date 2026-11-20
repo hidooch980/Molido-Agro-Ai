@@ -77,15 +77,14 @@ jobs:
               "/v1/erp/purchase/orders",
               "/v1/erp/finance/entries",
               "/v1/crm-erp/summary",
-              "/v1/crm/leads",
               "/v1/crm/activities",
+              "/v1/crm/opportunities",
               "/v1/crm/tickets",
-              "/v1/erp/ledger/accounts",
-              "/v1/erp/ledger/journals",
-              "/v1/erp/ledger/journals/{journal_id}/approve",
+              "/v1/erp/orders/{order_id}/transition",
+              "/v1/erp/accounting/journals",
+              "/v1/erp/accounting/trial-balance",
               "/v1/erp/settlements",
-              "/v1/erp/harvest",
-              "/v1/erp/reports/financial",
+              "/v1/erp/greenhouse/harvests",
           }
           missing = required.difference(schema.get("paths", {}))
           if missing:
