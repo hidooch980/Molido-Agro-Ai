@@ -52,3 +52,18 @@
 | اتصال تولید گلخانه به سفارش/انبار/هزینه | هنوز پیاده‌سازی نشده |
 | Android/Room و outbox برای CRM/ERP | هنوز پیاده‌سازی نشده |
 | آزمون CRM/ERP | آزمون‌های API نوشته شده‌اند؛ تا اجرای موفق CI تأییدشده محسوب نمی‌شوند |
+
+
+## CRM + ERP expansion (2026-11-20)
+| Scope | Implemented in source | Verification still required |
+|---|---|---|
+| Persian Android CRM/ERP | New CRM/ERP navigation tab, generic offline-first entry form/history, Room v7 business_records table, encrypted outbox enqueue | Android CI for this head, real-device UX, specialized forms |
+| CRM | Customer/supplier foundation, lead pipeline stages, activities/follow-up timestamps, support tickets/status | Full search/edit/delete, role permissions, complete customer lifecycle |
+| Orders | Draft sales/purchase orders; confirm/fulfil/cancel state machine; sales stock reservation and fulfil consumption; purchase fulfil receipt | Multi-warehouse selection, concurrency stress, full returns/refunds and approvals |
+| Finance | Chart-of-accounts seed, balanced double-entry journal validation, pending approval, server-side approval token, posted-only report | RBAC/two-person approval, decimal-safe accounting, Iran statutory rules, tax, bank reconciliation |
+| Harvest | API records harvest batches linked to synchronized greenhouse/crop-cycle records and increases stock | Android harvest form/API integration, batch/lot traceability and cost-of-production |
+| Settlement | Records partial settlements and prevents amount above order total | Reconciliation, automatic ledger posting, refunds and idempotency |
+| Sync | Generic entity types added to authenticated encrypted sync record store; Android local records enqueue encrypted outbox operations | Domain materialization adapters, remote-to-Room application for every new entity, conflict and replay stress tests |
+| Security/concurrency/recovery | Account scoping and write locks added to key inventory/order/ledger paths; tests added for account isolation and approval gate | Full penetration/security review, parallel load test, backup/restore with expanded schema, real LAN and phone acceptance |
+
+This expansion is source-code work under review. It is not a deployed or production-ready CRM/ERP release.
