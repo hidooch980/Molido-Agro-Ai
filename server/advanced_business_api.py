@@ -129,15 +129,6 @@ def register_advanced_business_routes(app, db, current_user, encrypt_payload, de
         CREATE INDEX IF NOT EXISTS idx_crm_tickets_status ON crm_tickets(user_id,status,created_at);
         CREATE INDEX IF NOT EXISTS idx_harvest_cycle ON harvest_batches(user_id,crop_cycle_id);
         """)
-        defaults = [
-          ("1000","نقد و بانک","ASSET"),("1100","حساب‌های دریافتنی","ASSET"),
-          ("1200","موجودی کالا","ASSET"),("2000","حساب‌های پرداختنی","LIABILITY"),
-          ("3000","سرمایه","EQUITY"),("4000","فروش محصولات","REVENUE"),
-          ("5000","بهای تمام‌شده فروش","EXPENSE"),("6000","هزینه‌های تولید","EXPENSE")
-        ]
-        for code,name,kind in defaults:
-            connection.execute("INSERT OR IGNORE INTO ledger_accounts(user_id,account_code,name,account_type) VALUES(?,?,?,?)",
-                               (uid_placeholder,code,name,kind))
 
     def uid_for(authorization):
         return current_user(authorization)
