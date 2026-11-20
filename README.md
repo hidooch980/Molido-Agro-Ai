@@ -50,3 +50,9 @@
 ## مجوز
 
 تا زمان انتخاب و ثبت مجوز رسمی، استفاده مجدد و توزیع این مخزن تابع حقوق مالکیت صاحب مخزن است.
+
+
+## CRM + ERP implementation status
+The CRM/ERP foundation is being delivered incrementally. Current backend work includes account-scoped customers, suppliers, products, CRM leads/activities/tickets, draft sales and purchase orders, inventory reservations and fulfilment, harvest-to-inventory posting, double-entry journals, human approval for manual ledger entries, and partial settlements. The Android Persian CRM/ERP tab currently provides encrypted local create-only forms and an HTTPS outbox for customers, suppliers, products, opportunities, tickets, draft orders and harvest records.
+
+This is not yet a complete production CRM/ERP: mobile update/delete and remote pull/conflict resolution, domain-table projection from the generic sync outbox, full mobile order/accounting workflows, Iranian statutory accounting/tax, multi-warehouse/lot/quality/costing, and physical-device acceptance tests remain outstanding. See [CRM_ERP.md](docs/CRM_ERP.md) for the detailed scope and limits.
