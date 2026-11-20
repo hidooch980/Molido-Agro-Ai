@@ -54,7 +54,7 @@ class TicketInput(BaseModel):
 
 class OrderTransitionInput(BaseModel):
     action: Literal["CONFIRM", "CANCEL", "SHIP", "DELIVER", "RECEIVE", "FULFILL"]
-    idempotencyKey: str = Field(min_length=8, max_length=200)
+    idempotencyKey: str = Field(default_factory=lambda: uuid.uuid4().hex, min_length=8, max_length=200)
 
 
 class HarvestInput(BaseModel):
