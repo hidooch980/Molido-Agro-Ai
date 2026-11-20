@@ -173,7 +173,16 @@ def test_double_entry_journal_rejects_unbalanced_and_posts_balanced():
         ]
     })
     assert balanced.status_code == 200, balanced.text
-    assert balanced.json()["totalDebit"] == balanced.json()["totalCredit"] == 1000
+    assert balanced.json()["status"] == "PENDING_APPROVAL"
+    assert balanced.json()["posted"] is False
+    journal_id = balanced.json()["id"]
+    import os
+    os.environ["MOLIDO_LEDGER_APPROVAL_TOKEN"] = "human-approval-token-for-ledger-testing-32"
+    denied = client.post(f"/v1/erp/ledger/journals/{journal_id}/approve", headers=owner)
+    assert denied.status_code == 403
+    approved = client.post(f"/v1/erp/ledger/journals/{journal_id}/approve",
+                           headers={**owner, "X-Approval-Token": os.environ["MOLIDO_LEDGER_APPROVAL_TOKEN"]})
+    assert approved.status_code == 200 and approved.json()["posted"] is True
     report = client.get("/v1/erp/reports/financial", headers=owner)
     assert report.status_code == 200
     assert report.json()["journalCount"] == 1
