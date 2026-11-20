@@ -146,3 +146,8 @@ register_sensor_routes(app, db, current_user, encrypt_payload, decrypt_payload)
 # CRM and ERP APIs share the same account identity, encrypted payload storage and audit boundary.
 from business_api import register_business_routes
 register_business_routes(app, db, current_user, encrypt_payload, decrypt_payload)
+
+
+# CRM pipeline, order lifecycle, double-entry journal and greenhouse harvest integration.
+from business_workflows import register_business_workflow_routes
+register_business_workflow_routes(app, db, current_user, encrypt_payload, decrypt_payload)
