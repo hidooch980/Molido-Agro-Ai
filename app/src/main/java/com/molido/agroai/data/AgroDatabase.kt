@@ -15,9 +15,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         FinancialEntryEntity::class,
         SyncOperationEntity::class,
         AppMetadataEntity::class,
-        SyncInboxEntity::class
+        SyncInboxEntity::class,
+        BusinessRecordEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class AgroDatabase : RoomDatabase() {
@@ -30,9 +31,17 @@ abstract class AgroDatabase : RoomDatabase() {
     abstract fun syncOperationDao(): SyncOperationDao
     abstract fun appMetadataDao(): AppMetadataDao
     abstract fun syncInboxDao(): SyncInboxDao
+    abstract fun businessRecordDao(): BusinessRecordDao
 
     companion object {
 
+
+        val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS business_records (id TEXT NOT NULL, recordType TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, payloadJson TEXT NOT NULL, createdAtEpochMillis INTEGER NOT NULL, PRIMARY KEY(id))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_business_records_recordType_createdAtEpochMillis ON business_records(recordType, createdAtEpochMillis)")
+            }
+        }
 
         val MIGRATION_5_6: Migration = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
