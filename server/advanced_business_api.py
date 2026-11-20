@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import hmac
 import time
 import uuid
 from typing import Literal
@@ -125,7 +127,7 @@ def register_advanced_business_routes(app, db, current_user, encrypt_payload, de
         );
         CREATE TABLE IF NOT EXISTS journal_entries (
           user_id TEXT NOT NULL, journal_id TEXT NOT NULL, reference TEXT,
-          description TEXT NOT NULL, currency TEXT NOT NULL, total_debit REAL NOT NULL,
+          description TEXT NOT NULL, currency TEXT NOT NULL, total_debit REAL NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING_APPROVAL',
           payload TEXT NOT NULL, created_at INTEGER NOT NULL,
           PRIMARY KEY(user_id,journal_id)
         );
@@ -349,9 +351,24 @@ def register_advanced_business_routes(app, db, current_user, encrypt_payload, de
                 if not c.execute("SELECT 1 FROM ledger_accounts WHERE user_id=? AND account_code=? AND active=1",(uid,line.accountCode)).fetchone():
                     raise HTTPException(422,f"Unknown account code: {line.accountCode}")
             payload=body.model_dump()
-            c.execute("INSERT INTO journal_entries VALUES(?,?,?,?,?,?,?,?)",
-                      (uid,journal_id,body.reference,body.description,body.currency,debit,encrypt_payload(payload),now))
-        return {"id":journal_id,"status":"POSTED","totalDebit":debit,"totalCredit":credit,"currency":body.currency}
+            c.execute("INSERT INTO journal_entries(user_id,journal_id,reference,description,currency,total_debit,status,payload,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                      (uid,journal_id,body.reference,body.description,body.currency,debit,"PENDING_APPROVAL",encrypt_payload(payload),now))
+        return {"id":journal_id,"status":"PENDING_APPROVAL","posted":False,"totalDebit":debit,"totalCredit":credit,"currency":body.currency}
+
+    @app.post("/v1/erp/ledger/journals/{journal_id}/approve")
+    def approve_journal(journal_id: str, x_approval_token: str | None=Header(default=None),
+                        authorization: str | None=Header(default=None)):
+        uid=uid_for(authorization)
+        configured=os.environ.get("MOLIDO_LEDGER_APPROVAL_TOKEN","")
+        if len(configured)<32: raise HTTPException(503,"Ledger approval token is not configured")
+        if not x_approval_token or not hmac.compare_digest(configured,x_approval_token):
+            raise HTTPException(403,"Ledger approval authorization failed")
+        with db() as c:
+            setup(c,uid)
+            changed=c.execute("UPDATE journal_entries SET status='POSTED' WHERE user_id=? AND journal_id=? AND status='PENDING_APPROVAL'",
+                              (uid,journal_id)).rowcount
+            if not changed: raise HTTPException(404,"Pending journal not found")
+        return {"id":journal_id,"status":"POSTED","posted":True}
 
     @app.post("/v1/erp/settlements")
     def create_settlement(body: SettlementInput, authorization: str | None=Header(default=None)):
@@ -372,7 +389,7 @@ def register_advanced_business_routes(app, db, current_user, encrypt_payload, de
         uid=uid_for(authorization)
         with db() as c:
             setup(c,uid)
-            rows=c.execute("SELECT payload FROM journal_entries WHERE user_id=?",(uid,)).fetchall()
+            rows=c.execute("SELECT payload FROM journal_entries WHERE user_id=? AND status='POSTED'",(uid,)).fetchall()
             totals={}
             for row in rows:
                 journal=decrypt_payload(row["payload"])
@@ -383,4 +400,4 @@ def register_advanced_business_routes(app, db, current_user, encrypt_payload, de
             accounts=c.execute("SELECT account_code,name,account_type FROM ledger_accounts WHERE user_id=?",(uid,)).fetchall()
         return {"accounts":[{"code":a["account_code"],"name":a["name"],"type":a["account_type"],
                              **totals.get(a["account_code"],{"debit":0.0,"credit":0.0})} for a in accounts],
-                "journalCount":len(rows),"basis":"posted double-entry journals only"}
+                "journalCount":len(rows),"basis":"posted double-entry journals only; pending approvals excluded"}
