@@ -89,7 +89,7 @@ jobs:
           missing = required.difference(schema.get("paths", {}))
           if missing:
               raise SystemExit(f"Sensor routes missing from container: {sorted(missing)}")
-          print("Container health, sensor routes and CRM/ERP routes verified.")
+          print("Container health, sensor, CRM pipeline, order lifecycle, accounting and harvest routes verified.")
           PY
 
   android-instrumented-tests:
