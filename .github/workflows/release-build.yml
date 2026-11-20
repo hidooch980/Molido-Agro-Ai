@@ -68,11 +68,20 @@ jobs:
               "/v1/sensors/greenhouses/{greenhouse_id}/readings",
               "/v1/sensors/greenhouses/{greenhouse_id}/thresholds",
               "/v1/sensors/greenhouses/{greenhouse_id}/status",
+              "/v1/crm/customers",
+              "/v1/erp/suppliers",
+              "/v1/erp/products",
+              "/v1/erp/inventory/movements",
+              "/v1/erp/inventory/balances",
+              "/v1/erp/sales/orders",
+              "/v1/erp/purchase/orders",
+              "/v1/erp/finance/entries",
+              "/v1/crm-erp/summary",
           }
           missing = required.difference(schema.get("paths", {}))
           if missing:
               raise SystemExit(f"Sensor routes missing from container: {sorted(missing)}")
-          print("Container health and all sensor routes verified.")
+          print("Container health, sensor routes and CRM/ERP routes verified.")
           PY
 
   android-instrumented-tests:
