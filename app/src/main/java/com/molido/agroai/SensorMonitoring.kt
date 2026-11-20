@@ -22,6 +22,9 @@ import androidx.compose.ui.unit.dp
 import com.molido.agroai.data.GreenhouseEntity
 import com.molido.agroai.BuildConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -58,11 +61,13 @@ fun SensorMonitoringPage(greenhouses: List<GreenhouseEntity>, token: String?) {
         loading = true
         message = "در حال دریافت وضعیت سنسورها..."
         scope.launch {
-            val results = withContext(Dispatchers.IO) {
-                greenhouses.associate { greenhouse ->
-                    greenhouse.id to runCatching { fetchGreenhouseSensorStatus(base, token, greenhouse.id) }
-                        .getOrElse { GreenhouseSensorStatus(greenhouse.id, "ERROR", error = it.message ?: "خطای ارتباط") }
-                }
+            val results = coroutineScope {
+                greenhouses.map { greenhouse ->
+                    async(Dispatchers.IO) {
+                        greenhouse.id to runCatching { fetchGreenhouseSensorStatus(base, token, greenhouse.id) }
+                            .getOrElse { GreenhouseSensorStatus(greenhouse.id, "ERROR", error = it.message ?: "خطای ارتباط") }
+                    }
+                }.awaitAll().toMap()
             }
             statuses = results
             val errors = results.values.count { it.state == "ERROR" }
