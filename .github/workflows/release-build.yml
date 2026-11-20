@@ -203,67 +203,39 @@ jobs:
           SYNC_BASE_URL: ${{ vars.SYNC_BASE_URL }}
         run: gradle --no-daemon --stacktrace -PSYNC_BASE_URL="${SYNC_BASE_URL:-}" :app:testDebugUnitTest :app:assembleDebug
 
-      - name: Prepare and validate signing key (when configured)
+      - name: Prepare and validate the single release signing key
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          GITHUB_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
-          if [ -z "${KEYSTORE_BASE64:-}" ] && [ -z "${KEYSTORE_PASSWORD:-}" ] && [ -z "${KEY_ALIAS:-}" ] && [ -z "${KEY_PASSWORD:-}" ]; then
-            echo "Signing secrets not configured; non-release builds remain unsigned."
-            exit 0
-          fi
-          if [ -z "${KEYSTORE_BASE64:-}" ] || [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
-            echo "::error::Signing secrets are incomplete. All four Android signing secrets must be configured."
+          if [ -z "${KEYSTORE_BASE64:-}" ] || [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ]; then
+            echo "::error::Release signing is mandatory. Configure ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, and ANDROID_KEY_ALIAS."
             exit 1
           fi
           KEYSTORE="$RUNNER_TEMP/molido-release.p12"
-          if ! printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"; then
-            echo "::error::ANDROID_KEYSTORE_BASE64 is not valid Base64."
-            exit 1
-          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
           chmod 600 "$KEYSTORE"
-          if ! keytool -list -keystore "$KEYSTORE" -storetype PKCS12 -storepass "$KEYSTORE_PASSWORD" > "$RUNNER_TEMP/keystore-list.txt" 2> "$RUNNER_TEMP/keystore-error.txt"; then
-            echo "::error::PKCS12 could not be opened. Diagnostic output follows; no secret values are printed."
-            sed -n '1,12p' "$RUNNER_TEMP/keystore-list.txt" || true
-            sed -n '1,12p' "$RUNNER_TEMP/keystore-error.txt" || true
-            file "$KEYSTORE" || true
-            wc -c "$KEYSTORE" || true
-            exit 1
-          fi
+          keytool -list -keystore "$KEYSTORE" -storetype PKCS12 -storepass "$KEYSTORE_PASSWORD" > "$RUNNER_TEMP/keystore-list.txt"
           if ! grep -Fq "$KEY_ALIAS" "$RUNNER_TEMP/keystore-list.txt"; then
-            echo "::error::PKCS12 opened, but the configured alias was not found."
-            grep -E '^[[:space:]]*[^,]+, ' "$RUNNER_TEMP/keystore-list.txt" | head -n 10 || true
+            echo "::error::The configured alias was not found in the PKCS12 keystore."
             exit 1
           fi
-          # PKCS12 private-key password must also unlock the selected alias.
-          if ! keytool -certreq -keystore "$KEYSTORE" -storetype PKCS12 \
-            -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" \
-            -alias "$KEY_ALIAS" -file "$RUNNER_TEMP/molido-signing-check.csr" \
-            >/dev/null 2> "$RUNNER_TEMP/key-password-error.txt"; then
-            echo "::error::The private-key password or alias is invalid for this PKCS12 keystore."
-            sed -n '1,8p' "$RUNNER_TEMP/key-password-error.txt" || true
-            exit 1
-          fi
+          keytool -certreq -keystore "$KEYSTORE" -storetype PKCS12 -storepass "$KEYSTORE_PASSWORD" -keypass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" -file "$RUNNER_TEMP/molido-signing-check.csr" >/dev/null
           rm -f "$RUNNER_TEMP/molido-signing-check.csr"
-          echo "PKCS12 store password, private-key password, and alias validated."
           echo "ANDROID_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
-
+          echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
       - name: Assemble release APK
         env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_VERSION_CODE: ${{ github.run_number }}
           ANDROID_VERSION_NAME: ${{ github.ref_name }}
           SYNC_BASE_URL: ${{ vars.SYNC_BASE_URL }}
         run: gradle --no-daemon --stacktrace -PSYNC_BASE_URL="${SYNC_BASE_URL:-}" :app:assembleRelease
 
-      - name: Verify APK and signing state
+      - name: Verify APK signature and certificate identity
         id: verify
         shell: bash
         run: |
@@ -274,28 +246,22 @@ jobs:
           APK="$(find "$RELEASE_DIR" -maxdepth 1 -name '*.apk' -type f -print -quit)"
           test -n "$APK" && test -s "$APK"
           APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
-          if [ -n "${ANDROID_KEYSTORE_PATH:-}" ]; then
-            "$APKSIGNER" verify --verbose "$APK"
-            echo "signed=true" >> "$GITHUB_OUTPUT"
-            cp "$APK" molido-agro-ai.apk
-            "$APKSIGNER" verify --print-certs molido-agro-ai.apk
-          else
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            cp "$APK" molido-agro-ai-unsigned.apk
-          fi
-          sha256sum "$DEBUG_APK" *.apk
-
-      - name: Require signing for version tags
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: test "${{ steps.verify.outputs.signed }}" = "true"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apk-signature-verification.txt"
+          grep -Fq "Verified using v1 scheme (JAR signing): true" "$RUNNER_TEMP/apk-signature-verification.txt"
+          grep -Fq "Verified using v2 scheme (APK Signature Scheme v2): true" "$RUNNER_TEMP/apk-signature-verification.txt"
+          grep -Fq "Verified using v3 scheme (APK Signature Scheme v3): true" "$RUNNER_TEMP/apk-signature-verification.txt"
+          EXPECTED_CERT_SHA256="$(keytool -exportcert -keystore "$ANDROID_KEYSTORE_PATH" -storetype PKCS12 -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" | sha256sum | awk '{print toupper($1)}')"
+          ACTUAL_CERT_SHA256="$(sed -n 's/.*Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-signature-verification.txt" | head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          test -n "$ACTUAL_CERT_SHA256"
+          test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256"
+          cp "$APK" molido-agro-ai.apk
+          sha256sum "$DEBUG_APK" molido-agro-ai.apk
 
       - name: Upload CI APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: molido-agro-ai-apk-${{ github.run_number }}
-          path: |
-            molido-agro-ai.apk
-            molido-agro-ai-unsigned.apk
+          path: molido-agro-ai.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -330,7 +296,6 @@ jobs:
         run: |
           set -euo pipefail
           test -s dist/molido-agro-ai.apk
-          test ! -e dist/molido-agro-ai-unsigned.apk
 
       - name: Create update manifest
         shell: bash
