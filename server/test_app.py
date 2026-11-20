@@ -162,3 +162,52 @@ def test_sensor_rejects_invalid_values_and_future_timestamps(tmp_path, monkeypat
         "measuredAtEpochMillis": int(__import__("time").time() * 1000) + 600_000,
     }, headers=headers)
     assert future.status_code == 422
+
+
+def test_chirpstack_device_mapping_and_signed_uplink_ingestion(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DB_PATH", tmp_path / "chirpstack.sqlite3")
+    monkeypatch.setattr(app, "JWT_SECRET", "test-secret-that-is-long-enough-for-hmac-sha256")
+    monkeypatch.setenv("MOLIDO_CHIRPSTACK_INGEST_SECRET", "chirpstack-test-secret-longer-than-32-characters")
+    app.init_db()
+    client = TestClient(app.app)
+    token = client.post("/v1/auth/register", json={
+        "username": "chirpstack_owner", "password": "strong-password-chirpstack"
+    }).json()["accessToken"]
+    headers = {"Authorization": f"Bearer {token}"}
+    greenhouse = {
+        "idempotencyKey": "gh-create-001", "entityType": "greenhouse",
+        "entityId": "gh-west", "operation": "CREATE",
+        "payload": {"name": "گلخانه غرب"}, "baseVersion": 0,
+    }
+    assert client.post("/v1/sync/push", json={"operations": [greenhouse]}, headers=headers).status_code == 200
+    mapped = client.post("/v1/sensors/devices", json={
+        "devEui": "A1B2C3D4E5F60718", "greenhouseId": "gh-west", "sensorId": "lora-01"
+    }, headers=headers)
+    assert mapped.status_code == 200
+    assert mapped.json()["greenhouseId"] == "gh-west"
+
+    import hashlib, hmac, json, time
+    event = {
+        "deviceInfo": {"devEui": "A1B2C3D4E5F60718"},
+        "fCnt": 17,
+        "time": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "object": {"temperatureC": 26.4, "relativeHumidityPct": 63.2},
+    }
+    raw = json.dumps(event, separators=(",", ":")).encode()
+    timestamp = str(int(time.time()))
+    nonce = "chirpstack-nonce-0001"
+    secret = "chirpstack-test-secret-longer-than-32-characters"
+    digest = hmac.new(secret.encode(), timestamp.encode() + b"." + nonce.encode() + b"." + raw, hashlib.sha256).hexdigest()
+    signed_headers = {"X-ChirpStack-Signature": f"{timestamp}:{nonce}:{digest}"}
+    accepted = client.post("/v1/integrations/chirpstack/uplink", content=raw, headers=signed_headers)
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "accepted"
+    status = client.get("/v1/sensors/greenhouses/gh-west/status", headers=headers).json()
+    assert status["temperatureC"] == 26.4
+    assert status["relativeHumidityPct"] == 63.2
+    replay = client.post("/v1/integrations/chirpstack/uplink", content=raw, headers=signed_headers)
+    assert replay.status_code == 409
+
+    tampered = raw.replace(b"26.4", b"29.4")
+    rejected = client.post("/v1/integrations/chirpstack/uplink", content=tampered, headers=signed_headers)
+    assert rejected.status_code == 401
