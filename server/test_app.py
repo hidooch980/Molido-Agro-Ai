@@ -211,3 +211,21 @@ def test_chirpstack_device_mapping_and_signed_uplink_ingestion(tmp_path, monkeyp
     tampered = raw.replace(b"26.4", b"29.4")
     rejected = client.post("/v1/integrations/chirpstack/uplink", content=tampered, headers=signed_headers)
     assert rejected.status_code == 401
+
+
+def test_encrypted_sqlite_backup_and_restore_round_trip(tmp_path, monkeypatch):
+    import base64, sqlite3, subprocess, sys
+    monkeypatch.setenv("MOLIDO_BACKUP_KEY", base64.urlsafe_b64encode(b"b" * 32).decode())
+    original = tmp_path / "source.sqlite3"
+    with sqlite3.connect(original) as connection:
+        connection.execute("CREATE TABLE sample(value TEXT NOT NULL)")
+        connection.execute("INSERT INTO sample(value) VALUES('backup-ok')")
+    backup = tmp_path / "backup.sqlite3.enc"
+    env = dict(os.environ, MOLIDO_DB_PATH=str(original))
+    subprocess.run([sys.executable, "backup_db.py", str(backup)], check=True, env=env, capture_output=True, text=True)
+    restored = tmp_path / "restored.sqlite3"
+    env["MOLIDO_DB_PATH"] = str(restored)
+    subprocess.run([sys.executable, "restore_db.py", str(backup)], check=True, env=env, capture_output=True, text=True)
+    with sqlite3.connect(restored) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert connection.execute("SELECT value FROM sample").fetchone()[0] == "backup-ok"
