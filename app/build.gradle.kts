@@ -10,6 +10,19 @@ val signingStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
 val signingKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
 val hasReleaseSigning = listOf(signingStoreFile, signingStorePassword, signingKeyAlias).all { !it.isNullOrBlank() }
 
+val versionProperties = java.util.Properties().apply {
+    rootProject.file("version.properties").inputStream().use { load(it) }
+}
+val baseVersionName = versionProperties.getProperty("VERSION_NAME", "0.1.0")
+val baseVersionCode = versionProperties.getProperty("VERSION_CODE", "1").toInt()
+val requestedVersionName = System.getenv("ANDROID_VERSION_NAME")?.trim()
+    ?.takeIf { it.isNotEmpty() }
+    ?.removePrefix("v")
+val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")
+val resolvedVersionName = requestedVersionName
+    ?: if (!ciRunNumber.isNullOrBlank()) "$baseVersionName-dev.$ciRunNumber" else baseVersionName
+val resolvedVersionCode = System.getenv("ANDROID_VERSION_CODE")?.toIntOrNull() ?: baseVersionCode
+
 val validateReleaseSigning = tasks.register("validateReleaseSigning") {
     group = "verification"
     description = "Require the configured PKCS12 key before packaging a release APK."
@@ -38,8 +51,8 @@ android {
         applicationId = "com.molido.agroai"
         minSdk = 26
         targetSdk = 35
-        versionCode = System.getenv("ANDROID_VERSION_CODE")?.toIntOrNull() ?: 1
-        versionName = System.getenv("ANDROID_VERSION_NAME")?.removePrefix("v") ?: "1.0.0"
+        versionCode = resolvedVersionCode
+        versionName = resolvedVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
