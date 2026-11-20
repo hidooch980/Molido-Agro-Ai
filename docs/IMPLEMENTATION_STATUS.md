@@ -64,6 +64,6 @@
 | Harvest | API records harvest batches linked to synchronized greenhouse/crop-cycle records and increases stock | Android harvest form/API integration, batch/lot traceability and cost-of-production |
 | Settlement | Records partial settlements and prevents amount above order total | Reconciliation, automatic ledger posting, refunds and idempotency |
 | Sync | Generic entity types added to authenticated encrypted sync record store; Android local records enqueue encrypted outbox operations | Domain materialization adapters, remote-to-Room application for every new entity, conflict and replay stress tests |
-| Security/concurrency/recovery | Account scoping and write locks added to key inventory/order/ledger paths; tests added for account isolation and approval gate | Full penetration/security review, parallel load test, backup/restore with expanded schema, real LAN and phone acceptance |
+| Security/concurrency/recovery | Account scoping and write locks added to key inventory/order/ledger paths; tests added for account isolation, approval gate and concurrent sales reservation oversell prevention | Full penetration/security review, parallel load test, backup/restore with expanded schema, real LAN and phone acceptance |
 
 This expansion is source-code work under review. It is not a deployed or production-ready CRM/ERP release.
