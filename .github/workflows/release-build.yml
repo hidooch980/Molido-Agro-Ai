@@ -101,39 +101,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           emulator-boot-timeout: 1200
           disable-animations: true
-          script: |
-            # The emulator action invokes this script through /bin/sh on Linux.
-            # Keep the wrapper POSIX-compatible; run the Gradle pipeline in Bash below.
-            set -eu
-            DIAG_DIR="$RUNNER_TEMP"
-            capture_emulator_diagnostics() {
-              set +e
-              adb devices -l > "$DIAG_DIR/molido-adb-devices.txt" 2>&1
-              timeout 20s adb logcat -d -v threadtime > "$DIAG_DIR/molido-emulator-logcat.txt" 2>&1
-              timeout 20s adb shell dumpsys activity processes > "$DIAG_DIR/molido-emulator-processes.txt" 2>&1
-            }
-            trap capture_emulator_diagnostics EXIT
-
-            echo "Waiting for the Android emulator transport..."
-            timeout --signal=TERM --kill-after=10s 180s adb wait-for-device
-            boot_completed=false
-            for attempt in $(seq 1 120); do
-              if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r')" = "1" ]; then
-                boot_completed=true
-                break
-              fi
-              sleep 2
-            done
-            if [ "$boot_completed" != "true" ]; then
-              echo "::error::Emulator transport connected but Android did not finish booting within 240 seconds."
-              exit 1
-            fi
-
-            adb shell settings put global window_animation_scale 0
-            adb shell settings put global transition_animation_scale 0
-            adb shell settings put global animator_duration_scale 0
-            echo "Emulator boot completed; starting instrumentation tests."
-            bash -o pipefail -c "timeout --signal=TERM --kill-after=30s 45m gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest 2>&1 | tee \"$DIAG_DIR/molido-instrumentation-gradle.log\""
+          script: bash .github/scripts/run-android-instrumentation.sh
 
       - name: Capture emulator diagnostics
         if: always()
@@ -247,6 +215,15 @@ jobs:
           APK="$(find "$RELEASE_DIR" -maxdepth 1 -name '*.apk' -type f -print -quit)"
           test -n "$APK" && test -s "$APK"
           APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          "$APKSIGNER" sign \
+            --ks "$ANDROID_KEYSTORE_PATH" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --key-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            "$APK"
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apk-signature-verification.txt"
           grep -Fq "Verified using v1 scheme (JAR signing): true" "$RUNNER_TEMP/apk-signature-verification.txt"
           grep -Fq "Verified using v2 scheme (APK Signature Scheme v2): true" "$RUNNER_TEMP/apk-signature-verification.txt"
