@@ -82,6 +82,7 @@ jobs:
               "/v1/crm/tickets",
               "/v1/erp/ledger/accounts",
               "/v1/erp/ledger/journals",
+              "/v1/erp/ledger/journals/{journal_id}/approve",
               "/v1/erp/settlements",
               "/v1/erp/harvest",
               "/v1/erp/reports/financial",
