@@ -102,7 +102,9 @@ jobs:
           emulator-boot-timeout: 1200
           disable-animations: true
           script: |
-            set -Eeuo pipefail
+            # The emulator action invokes this script through /bin/sh on Linux.
+            # Keep the wrapper POSIX-compatible; run the Gradle pipeline in Bash below.
+            set -eu
             DIAG_DIR="$RUNNER_TEMP"
             capture_emulator_diagnostics() {
               set +e
@@ -131,8 +133,7 @@ jobs:
             adb shell settings put global transition_animation_scale 0
             adb shell settings put global animator_duration_scale 0
             echo "Emulator boot completed; starting instrumentation tests."
-            set -o pipefail
-            timeout --signal=TERM --kill-after=30s 45m gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest 2>&1 | tee "$DIAG_DIR/molido-instrumentation-gradle.log"
+            bash -o pipefail -c "timeout --signal=TERM --kill-after=30s 45m gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest 2>&1 | tee \"$DIAG_DIR/molido-instrumentation-gradle.log\""
 
       - name: Capture emulator diagnostics
         if: always()
