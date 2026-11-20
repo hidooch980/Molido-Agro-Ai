@@ -8,8 +8,7 @@ plugins {
 val signingStoreFile = System.getenv("ANDROID_KEYSTORE_PATH")
 val signingStorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
 val signingKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
-val signingKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
-val hasReleaseSigning = listOf(signingStoreFile, signingStorePassword, signingKeyAlias, signingKeyPassword).all { !it.isNullOrBlank() }
+val hasReleaseSigning = listOf(signingStoreFile, signingStorePassword, signingKeyAlias).all { !it.isNullOrBlank() }
 
 android {
     namespace = "com.molido.agroai"
@@ -32,14 +31,18 @@ android {
                 storeType = "PKCS12"
                 storePassword = signingStorePassword
                 keyAlias = signingKeyAlias
-                keyPassword = signingKeyPassword
+                keyPassword = signingStorePassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
 
     buildTypes {
         release {
-            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
+            check(hasReleaseSigning) { "A single PKCS12 release signing key is required for every release APK." }
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
