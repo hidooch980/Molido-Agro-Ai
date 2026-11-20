@@ -354,6 +354,7 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
             init(c); rows=c.execute("SELECT journal_id,reference,currency,debit_total,credit_total,payload,created_at FROM journal_entries WHERE user_id=? ORDER BY created_at DESC LIMIT 500",(user,)).fetchall()
         return {"items":[{"id":r["journal_id"],"reference":r["reference"],"currency":r["currency"],"debitTotal":r["debit_total"],"creditTotal":r["credit_total"],"balanced":math.isclose(r["debit_total"],r["credit_total"],abs_tol=0.01),"createdAtEpochMillis":r["created_at"],**decrypt_payload(r["payload"])} for r in rows]}
 
+    @app.post("/v1/erp/harvest")
     @app.post("/v1/erp/greenhouse/harvests")
     def record_harvest(body: HarvestInput, authorization: str | None = Header(default=None)):
         user=uid(authorization); now=int(time.time()*1000); harvest_id=uuid.uuid4().hex
@@ -371,6 +372,7 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
             c.execute("INSERT INTO inventory_movements(user_id,idempotency_key,warehouse_id,product_id,movement_type,quantity,payload,created_at) VALUES(?,?,?,?,?,?,?,?)",(user,f"harvest:{harvest_id}",body.warehouseId,body.productId,"RECEIPT",body.quantity,encrypt_payload({"source":"HARVEST","harvestId":harvest_id,**payload}),now))
         return {"id":harvest_id,"status":"RECORDED","inventoryUpdated":True,"quantity":body.quantity,"unitPrice":body.unitPrice}
 
+    @app.get("/v1/erp/harvest")
     @app.get("/v1/erp/greenhouse/harvests")
     def list_harvests(authorization: str | None = Header(default=None)):
         user=uid(authorization)
