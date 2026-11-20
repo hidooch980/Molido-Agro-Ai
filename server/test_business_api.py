@@ -214,7 +214,8 @@ def test_sales_order_reservation_fulfilment_and_settlement():
         "orderId": order_id, "amount": 1000, "method": "BANK_TRANSFER", "reference": "BANK-001"
     })
     assert settlement.status_code == 200, settlement.text
-    assert settlement.json()["status"] == "RECORDED_NOT_RECONCILED"
+    assert settlement.json()["status"] == "POSTED"
+    assert settlement.json()["journalId"]
 
 
 def test_sales_reservation_prevents_overselling_and_releases_on_cancel():
