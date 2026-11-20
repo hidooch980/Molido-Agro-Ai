@@ -59,17 +59,18 @@ jobs:
           arch: x86_64
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim
+          emulator-boot-timeout: 600
           disable-animations: true
-          script: gradle --no-daemon --stacktrace :app:connectedDebugAndroidTest
+          script: timeout --signal=TERM --kill-after=30s 50m gradle --no-daemon --stacktrace :app:connectedDebugAndroidTest
 
       - name: Capture emulator diagnostics
         if: always()
         shell: bash
         run: |
           set +e
-          adb devices -l
-          adb logcat -d -v threadtime > "$RUNNER_TEMP/molido-emulator-logcat.txt" 2>&1
-          adb shell dumpsys activity processes > "$RUNNER_TEMP/molido-emulator-processes.txt" 2>&1
+          timeout 15s adb devices -l > "$RUNNER_TEMP/molido-adb-devices.txt" 2>&1 || true
+          timeout 20s adb logcat -d -v threadtime > "$RUNNER_TEMP/molido-emulator-logcat.txt" 2>&1 || true
+          timeout 20s adb shell dumpsys activity processes > "$RUNNER_TEMP/molido-emulator-processes.txt" 2>&1 || true
 
       - name: Upload emulator diagnostics
         if: always()
@@ -79,6 +80,9 @@ jobs:
           path: |
             ${{ runner.temp }}/molido-emulator-logcat.txt
             ${{ runner.temp }}/molido-emulator-processes.txt
+            ${{ runner.temp }}/molido-adb-devices.txt
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
           if-no-files-found: ignore
           retention-days: 7
 
