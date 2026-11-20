@@ -280,6 +280,27 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
                     c.execute("UPDATE order_reservations SET state='CONSUMED' WHERE user_id=? AND order_id=? AND product_id=? AND state='RESERVED'",(user,order_id,line["productId"]))
                 state="DELIVERED"
                 _post_order_journal(c,user,order_id,order["total"],"SALES",now,encrypt_payload)
+            elif action=="FULFILL":
+                if state!="CONFIRMED": raise HTTPException(409,"Only confirmed orders can be fulfilled")
+                if order["order_type"]=="SALES":
+                    reservations=c.execute("SELECT * FROM order_reservations WHERE user_id=? AND order_id=? AND state='RESERVED'",(user,order_id)).fetchall()
+                    if not reservations: raise HTTPException(409,"No active inventory reservation")
+                    for reservation in reservations:
+                        cur=c.execute("UPDATE inventory_balances SET quantity=quantity-?,updated_at=? WHERE user_id=? AND warehouse_id=? AND product_id=? AND quantity>=?",
+                                      (reservation["quantity"],now,user,reservation["warehouse_id"],reservation["product_id"],reservation["quantity"]))
+                        if cur.rowcount != 1: raise HTTPException(409,"Stock changed after reservation")
+                        c.execute("UPDATE order_reservations SET state='CONSUMED' WHERE user_id=? AND order_id=? AND product_id=? AND state='RESERVED'",
+                                  (user,order_id,reservation["product_id"]))
+                        c.execute("INSERT INTO inventory_movements(user_id,idempotency_key,warehouse_id,product_id,movement_type,quantity,payload,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                                  (user,"order-fulfill:"+order_id+":"+reservation["product_id"],reservation["warehouse_id"],reservation["product_id"],"ISSUE",reservation["quantity"],encrypt_payload({"orderId":order_id}),now))
+                    state="FULFILLED"
+                    _post_order_journal(c,user,order_id,order["total"],"SALES",now,encrypt_payload)
+                else:
+                    for line in lines:
+                        c.execute("INSERT INTO inventory_balances VALUES(?,?,?,?,?) ON CONFLICT(user_id,warehouse_id,product_id) DO UPDATE SET quantity=quantity+excluded.quantity,updated_at=excluded.updated_at",
+                                  (user,"main",line["productId"],line["quantity"],now))
+                    state="FULFILLED"
+                    _post_order_journal(c,user,order_id,order["total"],"PURCHASE",now,encrypt_payload)
             elif action=="RECEIVE":
                 if order["order_type"]!="PURCHASE" or state not in ("CONFIRMED","DRAFT"): raise HTTPException(409,"Purchase order must be confirmed before receipt")
                 for line in lines:
