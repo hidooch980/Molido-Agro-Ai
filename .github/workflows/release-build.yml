@@ -215,19 +215,11 @@ jobs:
           APK="$(find "$RELEASE_DIR" -maxdepth 1 -name '*.apk' -type f -print -quit)"
           test -n "$APK" && test -s "$APK"
           APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
-          "$APKSIGNER" sign \
-            --ks "$ANDROID_KEYSTORE_PATH" \
-            --ks-key-alias "$ANDROID_KEY_ALIAS" \
-            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
-            --key-pass env:ANDROID_KEYSTORE_PASSWORD \
-            --v1-signing-enabled true \
-            --v2-signing-enabled true \
-            --v3-signing-enabled true \
-            "$APK"
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apk-signature-verification.txt"
-          grep -Fq "Verified using v1 scheme (JAR signing): true" "$RUNNER_TEMP/apk-signature-verification.txt"
+          # minSdk is 26: V2 and V3 are the required schemes for every supported Android version.
           grep -Fq "Verified using v2 scheme (APK Signature Scheme v2): true" "$RUNNER_TEMP/apk-signature-verification.txt"
           grep -Fq "Verified using v3 scheme (APK Signature Scheme v3): true" "$RUNNER_TEMP/apk-signature-verification.txt"
+          grep -Fq "Number of signers: 1" "$RUNNER_TEMP/apk-signature-verification.txt"
           EXPECTED_CERT_SHA256="$(keytool -exportcert -keystore "$ANDROID_KEYSTORE_PATH" -storetype PKCS12 -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" | sha256sum | awk '{print toupper($1)}')"
           ACTUAL_CERT_SHA256="$(sed -n 's/.*Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-signature-verification.txt" | head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
           test -n "$ACTUAL_CERT_SHA256"
