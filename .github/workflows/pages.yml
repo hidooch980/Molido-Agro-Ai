@@ -2,7 +2,7 @@ name: Deploy Molido Agro AI Website
 
 on:
   push:
-    branches: [foundation/android-release-foundation]
+    branches: [main, foundation/android-release-foundation]
     paths:
       - 'site/**'
       - '.github/workflows/pages.yml'
