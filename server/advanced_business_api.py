@@ -205,6 +205,7 @@ def register_advanced_business_routes(app, db, current_user, encrypt_payload, de
         uid=uid_for(authorization); now=int(time.time()*1000)
         with db() as c:
             setup(c,uid)
+            c.execute("BEGIN IMMEDIATE")
             order=c.execute("SELECT order_type,status,payload FROM business_orders WHERE user_id=? AND order_id=?",(uid,order_id)).fetchone()
             if not order: raise HTTPException(404,"Order not found")
             payload=decrypt_payload(order["payload"]); lines=payload.get("lines",[])
@@ -256,6 +257,7 @@ def register_advanced_business_routes(app, db, current_user, encrypt_payload, de
         uid=uid_for(authorization); now=int(time.time()*1000); batch_id=uuid.uuid4().hex
         with db() as c:
             setup(c,uid)
+            c.execute("BEGIN IMMEDIATE")
             if not c.execute("SELECT 1 FROM business_products WHERE user_id=? AND product_id=?",(uid,body.productId)).fetchone():
                 raise HTTPException(404,"Product not found")
             if not c.execute("SELECT 1 FROM records WHERE user_id=? AND entity_type='greenhouse' AND entity_id=? AND deleted=0",(uid,body.greenhouseId)).fetchone():
@@ -299,6 +301,7 @@ def register_advanced_business_routes(app, db, current_user, encrypt_payload, de
             if (line.debit>0)==(line.credit>0): raise HTTPException(422,"Each journal line must contain either debit or credit, not both")
         with db() as c:
             setup(c,uid)
+            c.execute("BEGIN IMMEDIATE")
             for line in body.lines:
                 if not c.execute("SELECT 1 FROM ledger_accounts WHERE user_id=? AND account_code=? AND active=1",(uid,line.accountCode)).fetchone():
                     raise HTTPException(422,f"Unknown account code: {line.accountCode}")
@@ -312,6 +315,7 @@ def register_advanced_business_routes(app, db, current_user, encrypt_payload, de
         uid=uid_for(authorization); settlement_id=uuid.uuid4().hex; now=int(time.time()*1000)
         with db() as c:
             setup(c,uid)
+            c.execute("BEGIN IMMEDIATE")
             order=c.execute("SELECT order_type,status,total FROM business_orders WHERE user_id=? AND order_id=?",(uid,body.orderId)).fetchone()
             if not order or order["status"] not in ("CONFIRMED","FULFILLED"): raise HTTPException(404,"Active confirmed order not found")
             paid=c.execute("SELECT COALESCE(SUM(amount),0) AS n FROM settlements WHERE user_id=? AND order_id=?",(uid,body.orderId)).fetchone()["n"]
