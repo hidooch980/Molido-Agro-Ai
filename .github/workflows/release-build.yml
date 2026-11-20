@@ -141,6 +141,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Validate stable release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Release tags must use stable SemVer format vMAJOR.MINOR.PATCH (for example v1.0.0)."
+            exit 1
+          fi
+
       - name: Configure Android SDK
         shell: bash
         run: |
@@ -168,7 +178,7 @@ jobs:
       - name: Run Android unit tests and debug build
         env:
           ANDROID_VERSION_CODE: ${{ github.run_number }}
-          ANDROID_VERSION_NAME: ${{ github.ref_name }}
+          ANDROID_VERSION_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           SYNC_BASE_URL: ${{ vars.SYNC_BASE_URL }}
         run: gradle --no-daemon --stacktrace -PSYNC_BASE_URL="${SYNC_BASE_URL:-}" :app:testDebugUnitTest :app:assembleDebug
 
@@ -200,7 +210,7 @@ jobs:
       - name: Assemble release APK
         env:
           ANDROID_VERSION_CODE: ${{ github.run_number }}
-          ANDROID_VERSION_NAME: ${{ github.ref_name }}
+          ANDROID_VERSION_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           SYNC_BASE_URL: ${{ vars.SYNC_BASE_URL }}
         run: gradle --no-daemon --stacktrace -PSYNC_BASE_URL="${SYNC_BASE_URL:-}" :app:assembleRelease
 
