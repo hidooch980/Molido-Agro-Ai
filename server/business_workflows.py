@@ -206,19 +206,19 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
                     if c.execute("SELECT changes()").fetchone()[0]!=1: raise HTTPException(409,"Stock changed; delivery rejected")
                     c.execute("UPDATE order_reservations SET state='CONSUMED' WHERE user_id=? AND order_id=? AND product_id=? AND state='RESERVED'",(user,order_id,line["productId"]))
                 state="DELIVERED"
-                self._post_order_journal(c,user,order_id,order["total"],"SALES",now,encrypt_payload)
+                _post_order_journal(c,user,order_id,order["total"],"SALES",now,encrypt_payload)
             elif action=="RECEIVE":
                 if order["order_type"]!="PURCHASE" or state not in ("CONFIRMED","DRAFT"): raise HTTPException(409,"Purchase order must be confirmed before receipt")
                 for line in lines:
                     c.execute("""INSERT INTO inventory_balances VALUES(?,?,?,?,?) ON CONFLICT(user_id,warehouse_id,product_id) DO UPDATE SET quantity=quantity+excluded.quantity,updated_at=excluded.updated_at""",(user,"main",line["productId"],line["quantity"],now))
                 state="RECEIVED"
-                self._post_order_journal(c,user,order_id,order["total"],"PURCHASE",now,encrypt_payload)
+                _post_order_journal(c,user,order_id,order["total"],"PURCHASE",now,encrypt_payload)
             result={"id":order_id,"status":state,"action":action,"idempotencyKey":body.idempotencyKey}
             c.execute("UPDATE business_orders SET status=? WHERE user_id=? AND order_id=?",(state,user,order_id))
             c.execute("INSERT INTO business_transition_keys VALUES(?,?,?,?)",(user,body.idempotencyKey,json.dumps(result),now))
         return result
 
-    def _post_order_journal(self, c, user, order_id, amount, kind, now, encrypt):
+    def _post_order_journal(c, user, order_id, amount, kind, now, encrypt):
         amount=float(amount)
         if not math.isfinite(amount) or amount<=0: raise HTTPException(409,"Order value must be positive to post accounting")
         journal_id=uuid.uuid4().hex; reference=f"{kind}-{order_id}"
