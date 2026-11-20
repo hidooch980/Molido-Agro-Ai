@@ -10,11 +10,29 @@ from fastapi import Header, HTTPException
 from pydantic import BaseModel, Field
 
 
+class LeadInput(BaseModel):
+    customerId: str | None = None
+    title: str = Field(min_length=2, max_length=200)
+    source: str = Field(default="OTHER", max_length=40)
+    estimatedValue: float = Field(default=0, ge=0, allow_inf_nan=False)
+    currency: str = Field(default="IRR", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
+    stage: Literal["NEW", "QUALIFIED", "PROPOSAL", "WON", "LOST"] = "NEW"
+    nextActionAtEpochMillis: int | None = None
+    notes: str = Field(default="", max_length=4000)
+
+
+class LeadStageInput(BaseModel):
+    stage: Literal["NEW", "QUALIFIED", "PROPOSAL", "WON", "LOST"]
+    notes: str | None = Field(default=None, max_length=4000)
+
+
 class CRMActivityInput(BaseModel):
-    customerId: str = Field(min_length=1, max_length=200)
-    activityType: Literal["CALL", "EMAIL", "MEETING", "TASK", "NOTE"]
+    customerId: str | None = None
+    leadId: str | None = None
+    activityType: Literal["CALL", "EMAIL", "MEETING", "TASK", "NOTE", "VISIT"]
     subject: str = Field(min_length=2, max_length=200)
     description: str = Field(default="", max_length=4000)
+    details: str | None = Field(default=None, max_length=4000)
     dueAtEpochMillis: int | None = None
 
 
@@ -35,7 +53,7 @@ class TicketInput(BaseModel):
 
 
 class OrderTransitionInput(BaseModel):
-    action: Literal["CONFIRM", "CANCEL", "SHIP", "DELIVER", "RECEIVE"]
+    action: Literal["CONFIRM", "CANCEL", "SHIP", "DELIVER", "RECEIVE", "FULFILL"]
     idempotencyKey: str = Field(min_length=8, max_length=200)
 
 
@@ -46,7 +64,13 @@ class HarvestInput(BaseModel):
     warehouseId: str = Field(min_length=1, max_length=200)
     quantity: float = Field(gt=0, allow_inf_nan=False)
     unitPrice: float = Field(default=0, ge=0, allow_inf_nan=False)
+    unit: str = Field(default="kg", min_length=1, max_length=32)
+    qualityGrade: str = Field(default="UNASSESSED", max_length=40)
     notes: str = Field(default="", max_length=2000)
+
+
+class TicketStatusInput(BaseModel):
+    status: Literal["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED"]
 
 
 class JournalInput(BaseModel):
@@ -59,8 +83,14 @@ class JournalInput(BaseModel):
 def register_business_workflow_routes(app, db, current_user, encrypt_payload, decrypt_payload) -> None:
     def init(connection):
         connection.executescript("""
+        CREATE TABLE IF NOT EXISTS crm_leads (
+          user_id TEXT NOT NULL, lead_id TEXT NOT NULL, customer_id TEXT,
+          stage TEXT NOT NULL, estimated_value REAL NOT NULL, currency TEXT NOT NULL,
+          payload TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+          PRIMARY KEY(user_id,lead_id)
+        );
         CREATE TABLE IF NOT EXISTS crm_activities (
-          user_id TEXT NOT NULL, activity_id TEXT NOT NULL, customer_id TEXT NOT NULL,
+          user_id TEXT NOT NULL, activity_id TEXT NOT NULL, customer_id TEXT, lead_id TEXT,
           activity_type TEXT NOT NULL, subject TEXT NOT NULL, payload TEXT NOT NULL,
           due_at INTEGER, state TEXT NOT NULL, created_at INTEGER NOT NULL,
           PRIMARY KEY(user_id,activity_id)
