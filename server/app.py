@@ -75,7 +75,7 @@ class Credentials(BaseModel):
     password: str = Field(min_length=12,max_length=256)
 class Operation(BaseModel):
     idempotencyKey: str = Field(min_length=1,max_length=200)
-    entityType: Literal["greenhouse", "crop_cycle", "farm_activity", "inventory_item", "financial_entry"]
+    entityType: Literal["greenhouse", "crop_cycle", "farm_activity", "inventory_item", "financial_entry", "customer", "supplier", "product", "sales_order", "purchase_order", "inventory_movement", "crm_activity"]
     entityId: str = Field(min_length=1,max_length=200)
     operation: str = Field(pattern=r"^(CREATE|UPDATE|DELETE)$")
     payload: dict[str,Any] = Field(default_factory=dict)
@@ -142,3 +142,7 @@ def pull(body: PullBody, authorization: str | None = Header(default=None)):
 # Sensor endpoints are kept in a separate module to isolate the greenhouse telemetry API.
 from sensor_api import register_sensor_routes
 register_sensor_routes(app, db, current_user, encrypt_payload, decrypt_payload)
+
+# CRM and ERP APIs share the same account identity, encrypted payload storage and audit boundary.
+from business_api import register_business_routes
+register_business_routes(app, db, current_user, encrypt_payload, decrypt_payload)
