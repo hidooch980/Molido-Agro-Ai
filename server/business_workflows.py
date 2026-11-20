@@ -222,6 +222,13 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
 
     @app.patch("/v1/crm/tickets/{ticket_id}")
     def update_ticket(ticket_id: str, status: Literal["OPEN","IN_PROGRESS","WAITING_CUSTOMER","RESOLVED","CLOSED"], authorization: str | None = Header(default=None)):
+        return set_ticket_status(ticket_id, status, authorization)
+
+    @app.post("/v1/crm/tickets/{ticket_id}/status")
+    def update_ticket_status(ticket_id: str, body: TicketStatusInput, authorization: str | None = Header(default=None)):
+        return set_ticket_status(ticket_id, body.status, authorization)
+
+    def set_ticket_status(ticket_id: str, status: str, authorization: str | None):
         user=uid(authorization); now=int(time.time()*1000)
         with db() as c:
             init(c); cur=c.execute("UPDATE crm_tickets SET status=?,updated_at=? WHERE user_id=? AND ticket_id=?",(status,now,user,ticket_id))
@@ -241,6 +248,7 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
         user=uid(authorization); now=int(time.time()*1000)
         with db() as c:
             init(c)
+            c.execute("BEGIN IMMEDIATE")
             replay=c.execute("SELECT result FROM business_transition_keys WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
             if replay: return json.loads(replay["result"])
             order=c.execute("SELECT order_type,party_id,status,total,payload FROM business_orders WHERE user_id=? AND order_id=?",(user,order_id)).fetchone()
