@@ -155,7 +155,7 @@ def register_production_costing_routes(app, db, current_user, decrypt_payload) -
             if not entries: raise HTTPException(409,"No approved cost entries exist for this crop cycle")
             currencies={r["currency"] for r in entries}
             if currencies != {body.currency}: raise HTTPException(409,"Cost run currency does not match every cost entry")
-            harvests=c.execute("SELECT harvest_id,quantity,unit,payload FROM greenhouse_harvests WHERE user_id=? AND greenhouse_id=? AND crop_cycle_id=? ORDER BY created_at,harvest_id",
+            harvests=c.execute("SELECT harvest_id,quantity,payload FROM greenhouse_harvests WHERE user_id=? AND greenhouse_id=? AND crop_cycle_id=? ORDER BY created_at,harvest_id",
               (user,body.greenhouseId,body.cropCycleId)).fetchall()
             if not harvests: raise HTTPException(409,"No harvest output exists for this crop cycle")
             decoded=[]
