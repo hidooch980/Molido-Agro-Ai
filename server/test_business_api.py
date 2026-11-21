@@ -310,3 +310,46 @@ def test_concurrent_sales_reservations_cannot_oversell_stock():
     assert sorted(statuses) == [200, 409]
     reservations = client.get("/v1/erp/inventory/balances?warehouseId=main", headers=owner).json()["items"]
     assert reservations[0]["quantity"] == 5
+
+def test_inventory_idempotency_key_rejects_changed_payload_without_mutating_stock():
+    owner = account("stockkeyowner")
+    other = account("stockkeyother")
+    product = create_product(owner, "KEY-001")
+    other_product = create_product(other, "KEY-001")
+    request = {
+        "idempotencyKey": "inventory-key-collision-001",
+        "productId": product["id"],
+        "warehouseId": "main",
+        "movementType": "RECEIPT",
+        "quantity": 12,
+        "reference": "SUPPLIER-RECEIPT-1",
+        "notes": "Initial receipt",
+    }
+    created = client.post("/v1/erp/inventory/movements", headers=owner, json=request)
+    assert created.status_code == 200, created.text
+    assert created.json()["balance"] == 12
+
+    replay = client.post("/v1/erp/inventory/movements", headers=owner, json=request)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["status"] == "duplicate"
+    assert replay.json()["movementId"] == created.json()["movementId"]
+
+    changed = client.post(
+        "/v1/erp/inventory/movements",
+        headers=owner,
+        json={**request, "quantity": 99},
+    )
+    assert changed.status_code == 409, changed.text
+
+    balances = client.get("/v1/erp/inventory/balances", headers=owner).json()["items"]
+    assert len(balances) == 1
+    assert balances[0]["quantity"] == 12
+
+    # Idempotency keys are tenant-scoped, not globally reserved across accounts.
+    other_request = {**request, "productId": other_product["id"], "quantity": 3}
+    other_created = client.post(
+        "/v1/erp/inventory/movements", headers=other, json=other_request
+    )
+    assert other_created.status_code == 200, other_created.text
+    assert other_created.json()["balance"] == 3
+
