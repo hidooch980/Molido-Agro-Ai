@@ -116,7 +116,8 @@ fun CrmErpPage(accountId: String?, legacyRecords: List<com.molido.agroai.data.Bu
                 Text("•", color = MaterialTheme.colorScheme.primary)
                 Text("تعارض: " + records.count { it.accountId == accountId && it.syncState == "CONFLICT" }, style = MaterialTheme.typography.labelLarge)
             }
-            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        }
+        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 businessKinds.forEach { (key, title) ->
                     FilterChip(selected = selected == key, onClick = { selected = key }, label = { Text(title) })
                 }
@@ -210,11 +211,10 @@ fun CrmErpPage(accountId: String?, legacyRecords: List<com.molido.agroai.data.Bu
                         Text(businessKinds.firstOrNull { it.first == record.entityType.uppercase() }?.second ?: record.entityType, fontWeight = FontWeight.SemiBold)
                         Text(data?.optString("name").takeUnless { it.isNullOrBlank() } ?: data?.optString("title").takeUnless { it.isNullOrBlank() } ?: data?.optString("subject").takeUnless { it.isNullOrBlank() } ?: record.entityId)
                         Text("شناسه: " + record.entityId, style = MaterialTheme.typography.labelSmall)
-                        Text("وضعیت همگام‌سازی: " + when (record.syncState) { "SYNCED" -> "ارسال‌شده"; "CONFLICT" -> "نیازمند بررسی تعارض"; else -> "در صف ارسال" }, style = MaterialTheme.typography.labelSmall)
+                        Text("وضعیت همگام‌سازی: " + when (record.syncState) { "SYNCED" -> "ارسال‌شده"; "CONFLICT" -> "نیازمند بررسی تعارض"; "LOCAL_ONLY" -> "فقط روی این دستگاه"; else -> "در صف ارسال" }, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
-        }
     }
     }
 }
