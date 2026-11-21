@@ -35,3 +35,11 @@ def test_safe_autofix_rollback_does_not_touch_unchanged_files(tmp_path, monkeypa
  target.write_bytes(b'value = 1\n')
  monkeypatch.setattr(AGENT, 'ROOT', tmp_path)
  assert AGENT.rollback_safe_fixes({'server/same.py': b'value = 1\n'}, ['server/same.py']) == []
+
+def test_safe_autofix_rollback_restores_deleted_server_file(tmp_path, monkeypatch):
+ target = tmp_path / 'server' / 'deleted.py'
+ target.parent.mkdir()
+ monkeypatch.setattr(AGENT, 'ROOT', tmp_path)
+ restored = AGENT.rollback_safe_fixes({'server/deleted.py': b'value = 7\\n'}, ['server/deleted.py'])
+ assert restored == ['server/deleted.py']
+ assert target.read_bytes() == b'value = 7\\n'
