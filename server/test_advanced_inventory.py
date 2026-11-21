@@ -318,24 +318,18 @@ def test_sales_order_fefo_fulfillment_posts_lot_movements_against_order():
     customer = client.post("/v1/crm/customers", headers=h, json={"name":"FEFO Customer"})
     p = product(h, "CUC-SALES-FEFO")
     w = warehouse(h, "SALES-FEFO")
-    # Legacy balance is only used by the existing order-confirmation gate.
-    legacy = client.post("/v1/erp/inventory/movements", headers=h, json={
-        "idempotencyKey":"legacy-sales-stock-001","productId":p,"warehouseId":"main",
-        "movementType":"RECEIPT","quantity":5
-    })
-    assert legacy.status_code == 200, legacy.text
     order = client.post("/v1/erp/sales/orders", headers=h, json={
         "partyId":customer.json()["id"],"lines":[{"productId":p,"quantity":5,"unitPrice":100}]
     })
     assert order.status_code == 200, order.text
-    confirmed = client.post(f"/v1/erp/orders/{order.json()['id']}/transition", headers=h,
-                            json={"action":"CONFIRM","idempotencyKey":"confirm-sales-fefo-001"})
-    assert confirmed.status_code == 200 and confirmed.json()["status"] == "CONFIRMED"
     received = lot(h,p,w,"sales-fefo-lot-001","SALES-FEFO-LOT","5")
     release(h,received["lotId"])
     reserved = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/fefo-reservations",
                            headers=h,json={"idempotencyKey":"order-fefo-reserve-001","warehouseId":w})
     assert reserved.status_code == 200, reserved.text
+    confirmed = client.post(f"/v1/erp/orders/{order.json()['id']}/transition", headers=h,
+                            json={"action":"CONFIRM","idempotencyKey":"confirm-sales-fefo-001"})
+    assert confirmed.status_code == 200 and confirmed.json()["status"] == "CONFIRMED"
     shipped = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/fulfill",
                           headers=h,json={"idempotencyKey":"order-fefo-ship-001"})
     assert shipped.status_code == 200, shipped.text
