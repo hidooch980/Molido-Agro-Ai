@@ -51,27 +51,32 @@ def safe_fixes(enabled: bool) -> dict:
  ruff = shutil.which('ruff')
  if not ruff: return {'enabled': True, 'status': 'skipped_tool_unavailable', 'changed_files': []}
  p = subprocess.run([ruff, 'check', '--fix', 'server'], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+ global _SAFE_FIX_RESULT_SNAPSHOT
  changed = []
  for name, original in _SAFE_FIX_SNAPSHOT.items():
   path = ROOT / name
   if path.is_file() and path.read_bytes() != original:
    changed.append(name)
+ _SAFE_FIX_RESULT_SNAPSHOT = {name: (ROOT / name).read_bytes() for name in changed}
  return {'enabled': True, 'status': 'completed' if p.returncode == 0 else 'needs_review', 'exit_code': p.returncode, 'changed_files': sorted(changed), 'output_tail': '\n'.join((p.stdout or '').splitlines()[-60:])}
 def main() -> int:
  ap=argparse.ArgumentParser(); ap.add_argument('--report-dir',default='artifacts/bughunter'); ap.add_argument('--timeout',type=int,default=1800); ap.add_argument('--apply-safe-fixes',action='store_true'); args=ap.parse_args()
  outdir=ROOT/args.report_dir; outdir.mkdir(parents=True,exist_ok=True)
- global _SAFE_FIX_SNAPSHOT
+ global _SAFE_FIX_SNAPSHOT, _SAFE_FIX_RESULT_SNAPSHOT
  _SAFE_FIX_SNAPSHOT = snapshot_server_python() if args.apply_safe_fixes else {}
+ _SAFE_FIX_RESULT_SNAPSHOT = {}
  fixes=safe_fixes(args.apply_safe_fixes); checks=[]
  if (ROOT/'server').is_dir(): checks.append(run_check('server_pytest',[sys.executable,'-m','pytest','-q','server'],args.timeout))
  if (ROOT/'gradlew').exists(): checks.append(run_check('android_unit_tests',['./gradlew','--no-daemon',':app:testDebugUnitTest'],args.timeout))
  elif shutil.which('gradle') and (ROOT/'app').is_dir(): checks.append(run_check('android_unit_tests',['gradle','--no-daemon',':app:testDebugUnitTest'],args.timeout))
  if not checks: checks.append(Check('discovery',[],'not_run',None,0.0,['no_test_runner'],'No supported test runner found.'))
  passed=sum(c.status=='passed' for c in checks); failed=sum(c.status in ('failed','timed_out') for c in checks)
- if fixes.get('enabled') and fixes.get('changed_files') and (passed != len(checks) or fixes.get('status') != 'completed'):
+ drift = [name for name, expected in _SAFE_FIX_RESULT_SNAPSHOT.items() if not (ROOT / name).is_file() or (ROOT / name).read_bytes() != expected]
+ if fixes.get('enabled') and fixes.get('changed_files') and (passed != len(checks) or fixes.get('status') != 'completed' or drift):
   fixes['rollback_files'] = rollback_safe_fixes(_SAFE_FIX_SNAPSHOT, fixes['changed_files'])
   fixes['status'] = 'rolled_back' if fixes['rollback_files'] else 'needs_review'
   fixes['changed_files'] = []
+  if drift: fixes['test_side_effects_detected'] = drift
  if fixes.get('status') == 'completed' and fixes.get('changed_files') and passed == len(checks):
   patch = subprocess.run(['git', 'diff', '--binary', '--', *fixes['changed_files']], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
   if patch.returncode == 0 and patch.stdout:
