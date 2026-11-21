@@ -82,8 +82,11 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json
+          import json, os, subprocess
           from pathlib import Path, PurePosixPath
+          checked_out = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if checked_out != os.environ['GITHUB_SHA']:
+              raise SystemExit('Branch advanced after diagnostics; refusing to apply a stale patch.')
           report = json.loads(Path('artifacts/bughunter/bughunter-report.json').read_text(encoding='utf-8'))
           fixes = report.get('safe_fixes', {})
           if report.get('overall') != 'passed' or fixes.get('status') != 'completed':
@@ -101,19 +104,19 @@ jobs:
             git apply --check artifacts/bughunter/safe-fixes.patch
             git apply --index artifacts/bughunter/safe-fixes.patch
             python - <<'PY'
-            import subprocess
-            from pathlib import PurePosixPath
-            raw = subprocess.check_output(['git', 'diff', '--cached', '--name-only', '-z']).decode()
-            names = [name for name in raw.split('\0') if name]
-            for name in names:
-                path = PurePosixPath(name)
-                if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'server' or path.suffix != '.py':
-                    raise SystemExit('Refusing staged out-of-scope path: ' + name)
-            PY
-            if ! git diff --cached --quiet; then
-              git config user.name 'github-actions[bot]'
-              git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-              git commit -m 'chore(bughunter): apply tested safe Python fixes [skip ci]'
-              git push origin HEAD:feature/bughunter-autofix-agent
-            fi
+          import subprocess
+          from pathlib import PurePosixPath
+          raw = subprocess.check_output(['git', 'diff', '--cached', '--name-only', '-z']).decode()
+          names = [name for name in raw.split('\0') if name]
+          for name in names:
+              path = PurePosixPath(name)
+              if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'server' or path.suffix != '.py':
+                  raise SystemExit('Refusing staged out-of-scope path: ' + name)
+          PY
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'chore(bughunter): apply tested safe Python fixes [skip ci]'
+            git push origin HEAD:feature/bughunter-autofix-agent
           fi
+        fi
