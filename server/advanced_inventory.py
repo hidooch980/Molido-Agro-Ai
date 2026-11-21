@@ -3,11 +3,24 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
 from fastapi import Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
+
+
+def _validate_iso_date(value: str | None) -> str | None:
+    if value is None:
+        return value
+    try:
+        parsed = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise ValueError("date must use valid YYYY-MM-DD format")
+    if parsed.isoformat() != value:
+        raise ValueError("date must use valid YYYY-MM-DD format")
+    return value
 
 
 class WarehouseInput(BaseModel):
@@ -36,6 +49,11 @@ class LotInput(BaseModel):
         if not value.is_finite():
             raise ValueError("quantity must be finite")
         return value
+
+    @field_validator("manufactureDate", "harvestDate", "receivedDate", "expiryDate")
+    @classmethod
+    def valid_lot_dates(cls, value: str | None) -> str | None:
+        return _validate_iso_date(value)
 
 
 class TransferInput(BaseModel):
