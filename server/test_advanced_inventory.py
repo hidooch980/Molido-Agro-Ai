@@ -371,7 +371,7 @@ def test_customer_and_supplier_returns_require_approval_and_keep_ledger_history(
     assert supplier_journal.status_code == 200 and supplier_journal.json()["status"] == "POSTED"
     trace = client.get(f"/v2/erp/inventory/lots/{received['lotId']}/trace", headers=h).json()
     assert [x["type"] for x in trace["movements"]][-1] == "SUPPLIER_RETURN"
-    assert trace["balances"][0]["quantity"] == "6"
+    assert Decimal(trace["balances"][0]["quantity"]) == Decimal("6")
 
 
 def test_scrap_and_cycle_count_are_approval_gated_and_idempotent():
@@ -734,12 +734,28 @@ def test_reservation_idempotency_keys_cannot_be_reused_for_different_requests_or
 
 def test_return_idempotency_key_rejects_changed_payload():
     h = account("return-key-replay")
+    customer = client.post("/v1/crm/customers", headers=h, json={"name": "Return Replay Customer"})
     p = product(h, "CUC-RETURN-REPLAY")
     w = warehouse(h, "RETURN-REPLAY")
     received = lot(h, p, w, key="return-replay-lot-01", code="RETURN-REPLAY-LOT", quantity="10")
+    release(h, received["lotId"])
+    order = client.post("/v1/erp/sales/orders", headers=h, json={
+        "partyId": customer.json()["id"], "lines": [{"productId": p, "quantity": 2, "unitPrice": 100}]
+    })
+    assert order.status_code == 200, order.text
+    order_id = order.json()["id"]
+    reserved = client.post(f"/v2/erp/inventory/orders/{order_id}/fefo-reservations", headers=h,
+                           json={"idempotencyKey": "return-replay-reserve-01", "warehouseId": w})
+    assert reserved.status_code == 200, reserved.text
+    confirmed = client.post(f"/v1/erp/orders/{order_id}/transition", headers=h,
+                            json={"action": "CONFIRM", "idempotencyKey": "return-replay-confirm-01"})
+    assert confirmed.status_code == 200, confirmed.text
+    shipped = client.post(f"/v2/erp/inventory/orders/{order_id}/fulfill", headers=h,
+                          json={"idempotencyKey": "return-replay-ship-01"})
+    assert shipped.status_code == 200, shipped.text
     body = {"idempotencyKey":"return-replay-key-001","direction":"CUSTOMER_RETURN",
             "lotId":received["lotId"],"warehouseId":w,"quantity":"2",
-            "referenceId":"SALE-RETURN-01","reason":"Damaged package","currency":"IRR"}
+            "referenceId":order_id,"reason":"Damaged package","currency":"IRR"}
     first = client.post("/v2/erp/inventory/returns", headers=h, json=body)
     assert first.status_code == 200, first.text
     duplicate = client.post("/v2/erp/inventory/returns", headers=h, json=body)
@@ -873,15 +889,15 @@ def test_sales_order_fulfillment_rejects_partial_inventory_reservations():
     assert order.status_code == 200, order.text
     received = lot(h, p, w, "sales-partial-lot-001", "SALES-PARTIAL-LOT", "10")
     release(h, received["lotId"])
+    confirmed = client.post(f"/v1/erp/orders/{order.json()['id']}/transition", headers=h,
+                            json={"action": "CONFIRM", "idempotencyKey": "sales-partial-confirm-001"})
+    assert confirmed.status_code == 200, confirmed.text
     partial = client.post("/v2/erp/inventory/reservations", headers=h, json={
         "idempotencyKey": "sales-partial-reserve-001", "lotId": received["lotId"],
         "warehouseId": w, "referenceType": "SALES_ORDER", "referenceId": order.json()["id"],
         "quantity": "4",
     })
     assert partial.status_code == 200, partial.text
-    confirmed = client.post(f"/v1/erp/orders/{order.json()['id']}/transition", headers=h,
-                            json={"action": "CONFIRM", "idempotencyKey": "sales-partial-confirm-001"})
-    assert confirmed.status_code == 200, confirmed.text
     blocked = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/fulfill", headers=h,
                           json={"idempotencyKey": "sales-partial-fulfill-001"})
     assert blocked.status_code == 409, blocked.text
