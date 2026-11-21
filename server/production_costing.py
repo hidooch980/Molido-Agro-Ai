@@ -150,9 +150,11 @@ def register_production_costing_routes(app, db, current_user, decrypt_payload) -
             duplicate=c.execute("SELECT run_id,version FROM crop_cost_runs WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
             if duplicate: return {"status":"duplicate","runId":duplicate["run_id"],"version":duplicate["version"]}
             ensure_cycle(c,user,body.greenhouseId,body.cropCycleId)
-            entries=c.execute("SELECT category,amount,currency,allocation_method FROM crop_cost_entries WHERE user_id=? AND greenhouse_id=? AND crop_cycle_id=? AND approval_status='APPROVED'",
+            entries=c.execute("SELECT category,amount,currency,allocation_method,approval_status FROM crop_cost_entries WHERE user_id=? AND greenhouse_id=? AND crop_cycle_id=?",
               (user,body.greenhouseId,body.cropCycleId)).fetchall()
-            if not entries: raise HTTPException(409,"No approved cost entries exist for this crop cycle")
+            if not entries: raise HTTPException(409,"No cost entries exist for this crop cycle")
+            if any(row["approval_status"] != "APPROVED" for row in entries):
+                raise HTTPException(409,"All crop-cycle cost entries must be approved before costing")
             currencies={r["currency"] for r in entries}
             if currencies != {body.currency}: raise HTTPException(409,"Cost run currency does not match every cost entry")
             harvests=c.execute("SELECT harvest_id,quantity,payload FROM greenhouse_harvests WHERE user_id=? AND greenhouse_id=? AND crop_cycle_id=? ORDER BY created_at,harvest_id",
