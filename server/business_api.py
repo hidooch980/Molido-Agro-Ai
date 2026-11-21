@@ -208,10 +208,15 @@ def register_business_routes(app, db, current_user, encrypt_payload, decrypt_pay
             ensure_tables(connection)
             connection.execute("BEGIN IMMEDIATE")
             duplicate = connection.execute(
-                "SELECT id FROM inventory_movements WHERE user_id=? AND idempotency_key=?",
+                "SELECT id,payload FROM inventory_movements WHERE user_id=? AND idempotency_key=?",
                 (uid, body.idempotencyKey),
             ).fetchone()
             if duplicate:
+                # An idempotency key is bound to the complete original request.
+                # Replaying the same request is safe; changing its payload is a conflict.
+                original_payload = decrypt_payload(duplicate["payload"])
+                if original_payload != body.model_dump():
+                    raise HTTPException(409, "Idempotency key already belongs to a different inventory movement")
                 return {"status": "duplicate", "movementId": duplicate["id"]}
             product = connection.execute(
                 "SELECT 1 FROM business_products WHERE user_id=? AND product_id=?",
