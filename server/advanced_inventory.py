@@ -55,6 +55,22 @@ class ReservationInput(BaseModel):
     quantity: Decimal = Field(gt=0, max_digits=24, decimal_places=6)
 
 
+class FefoAllocationInput(BaseModel):
+    idempotencyKey: str = Field(min_length=8, max_length=160)
+    warehouseId: str = Field(min_length=1, max_length=200)
+    productId: str = Field(min_length=1, max_length=200)
+    referenceType: str = Field(min_length=2, max_length=40)
+    referenceId: str = Field(min_length=1, max_length=200)
+    quantity: Decimal = Field(gt=0, max_digits=24, decimal_places=6)
+
+    @field_validator("quantity")
+    @classmethod
+    def finite_quantity(cls, value: Decimal) -> Decimal:
+        if not value.is_finite():
+            raise ValueError("quantity must be finite")
+        return value
+
+
 class QualityInput(BaseModel):
     state: Literal["RELEASED", "QUARANTINED", "REJECTED", "EXPIRED"]
     reason: str = Field(min_length=3, max_length=1000)
@@ -111,6 +127,10 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
           user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, reservation_id TEXT NOT NULL,
           action TEXT NOT NULL, result TEXT NOT NULL, created_at INTEGER NOT NULL,
           PRIMARY KEY(user_id,idempotency_key)
+        );
+        CREATE TABLE IF NOT EXISTS adv_fefo_allocations(
+          user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, result TEXT NOT NULL,
+          created_at INTEGER NOT NULL, PRIMARY KEY(user_id,idempotency_key)
         );
         CREATE INDEX IF NOT EXISTS idx_adv_lots_expiry ON adv_lots(user_id,expiry_date);
         CREATE INDEX IF NOT EXISTS idx_adv_movements_lot ON adv_stock_movements(user_id,lot_id,created_at);
@@ -334,6 +354,50 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
           "balances":[{"warehouseId":r["warehouse_id"],"warehouseCode":r["code"],"warehouseName":r["name"],
             "quantity":r["quantity"],"updatedAt":r["updated_at"]} for r in balances]
         }
+
+    @app.post("/v2/erp/inventory/fefo/allocate")
+    def allocate_fefo(body: FefoAllocationInput, authorization: str | None = Header(default=None)):
+        user=actor(authorization); now=int(time.time()*1000)
+        today=time.strftime("%Y-%m-%d",time.gmtime())
+        with db() as c:
+            schema(c); c.execute("BEGIN IMMEDIATE")
+            previous=c.execute("SELECT result FROM adv_fefo_allocations WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
+            if previous:
+                result=json.loads(previous["result"]); result["status"]="duplicate"; return result
+            ensure_warehouse(c,user,body.warehouseId); ensure_product(c,user,body.productId)
+            rows=c.execute("""SELECT l.lot_id,l.product_id,l.expiry_date,l.received_date,l.created_at,b.quantity
+              FROM adv_lots l JOIN adv_stock_balances b ON b.user_id=l.user_id AND b.lot_id=l.lot_id
+              WHERE l.user_id=? AND l.product_id=? AND b.warehouse_id=? AND l.quality_state='RELEASED'
+                AND (l.expiry_date IS NULL OR l.expiry_date>=?)
+              ORDER BY CASE WHEN l.expiry_date IS NULL THEN 1 ELSE 0 END,
+                l.expiry_date ASC, COALESCE(l.received_date,''),l.created_at,l.lot_id""",
+              (user,body.productId,body.warehouseId,today)).fetchall()
+            available=[]; total=Decimal("0")
+            for row in rows:
+                on_hand=Decimal(row["quantity"])
+                reserved=sum((Decimal(r["quantity"]) for r in c.execute(
+                  "SELECT quantity FROM adv_reservations WHERE user_id=? AND warehouse_id=? AND lot_id=? AND state='ACTIVE'",
+                  (user,body.warehouseId,row["lot_id"])).fetchall()),Decimal("0"))
+                free=max(Decimal("0"),on_hand-reserved)
+                if free>0:
+                    available.append((row,free)); total+=free
+            if total<body.quantity:
+                raise HTTPException(409,"Insufficient unreserved released stock for FEFO allocation")
+            remaining=body.quantity; allocations=[]
+            for index,(row,free) in enumerate(available):
+                if remaining<=0: break
+                take=min(free,remaining)
+                reservation_id=uuid.uuid4().hex
+                child_key=f"{body.idempotencyKey}:{index}"
+                c.execute("INSERT INTO adv_reservations VALUES(?,?,?,?,?,?,?,?,?,?)",
+                  (reservation_id,user,child_key,row["lot_id"],body.warehouseId,body.referenceType,body.referenceId,format(take,"f"),"ACTIVE",now))
+                allocations.append({"reservationId":reservation_id,"lotId":row["lot_id"],"quantity":format(take,"f"),"expiryDate":row["expiry_date"]})
+                remaining-=take
+            result={"status":"reserved","productId":body.productId,"warehouseId":body.warehouseId,
+              "requestedQuantity":format(body.quantity,"f"),"allocations":allocations}
+            c.execute("INSERT INTO adv_fefo_allocations VALUES(?,?,?,?)",
+              (user,body.idempotencyKey,json.dumps(result,separators=(",",":")),now))
+        return result
 
     @app.get("/v2/erp/inventory/balances")
     def advanced_balances(authorization: str | None = Header(default=None)):
