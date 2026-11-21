@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import org.junit.Rule
 import org.junit.Test
 
@@ -30,7 +31,16 @@ class MainActivityUiTest {
     fun crmErpWorkspaceIsAvailableInPersianNavigation() {
         composeRule.onNodeWithText("CRM/ERP").performClick()
         composeRule.onNodeWithText("مدیریت مشتری و کسب‌وکار").assertIsDisplayed()
-        composeRule.onNodeWithText("برای نگهداری اطلاعات خصوصی، ابتدا وارد حساب شوید.").assertIsDisplayed()
+        composeRule.onNodeWithText("حالت محلی بدون حساب فعال است", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("ثبت مشتری").assertIsDisplayed()
+    }
+
+    @Test
+    fun crmErpSavesEncryptedCustomerLocallyWithoutAccount() {
+        composeRule.onNodeWithText("CRM/ERP").performClick()
+        composeRule.onNodeWithText("نام مشتری").performScrollTo().performTextInput("مشتری محلی آزمایشی")
+        composeRule.onNodeWithText("ثبت مشتری").performScrollTo().performClick()
+        composeRule.onNodeWithText("اطلاعات رمزگذاری‌شده فقط روی این دستگاه ذخیره شد", substring = true).assertIsDisplayed()
     }
 
     @Test
