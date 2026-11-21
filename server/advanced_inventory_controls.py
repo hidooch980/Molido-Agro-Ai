@@ -360,7 +360,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                     "currency": body.currency,
                 }, "return")
                 return {"status":"duplicate","documentId":old["document_id"],"state":old["state"]}
-            lot = c.execute("""SELECT product_id,lot_code,unit,expiry_date,quality_state
+            lot = c.execute("""SELECT product_id,lot_code,unit,expiry_date,quality_state,source_type,source_id
               FROM adv_lots WHERE user_id=? AND lot_id=?""",(user,body.lotId)).fetchone()
             if not lot:
                 raise HTTPException(404,"Lot not found in this account")
@@ -368,6 +368,8 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                              (user,body.warehouseId)).fetchone():
                 raise HTTPException(404,"Warehouse not found in this account")
             if body.direction == "SUPPLIER_RETURN":
+                if lot["source_type"] != "SUPPLIER":
+                    raise HTTPException(409,"Supplier return is only valid for supplier-sourced lots")
                 on_hand = balance(c,user,body.warehouseId,body.lotId)
                 if on_hand - reserved(c,user,body.warehouseId,body.lotId) < requested:
                     raise HTTPException(409,"Supplier return exceeds unreserved stock")
