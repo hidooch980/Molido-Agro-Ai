@@ -1,8 +1,9 @@
 import importlib.util
+import sys
 from pathlib import Path
 MODULE=Path(__file__).resolve().parents[1]/'scripts'/'bughunter_agent.py'
 SPEC=importlib.util.spec_from_file_location('bughunter_agent',MODULE)
-AGENT=importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(AGENT)
+AGENT=importlib.util.module_from_spec(SPEC); sys.modules[SPEC.name]=AGENT; SPEC.loader.exec_module(AGENT)
 def test_classifies_dependency_migration_and_permissions():
  assert 'dependency' in AGENT.classify('ModuleNotFoundError: No module named x')
  assert 'migration' in AGENT.classify('sqlite no such column')
