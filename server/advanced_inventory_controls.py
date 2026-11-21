@@ -648,6 +648,14 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
             if not order: raise HTTPException(404,"Sales order not found in this account")
             if order["order_type"]!="SALES" or order["status"] not in ("DRAFT","CONFIRMED"):
                 raise HTTPException(409,"Only draft or confirmed sales orders can reserve FEFO stock")
+            existing_active = c.execute(
+                """SELECT 1 FROM adv_reservations
+                   WHERE user_id=? AND reference_type='SALES_ORDER' AND reference_id=? AND state='ACTIVE'
+                   LIMIT 1""",
+                (user, order_id),
+            ).fetchone()
+            if existing_active:
+                raise HTTPException(409, "Sales order already has active inventory reservations")
             if not c.execute("SELECT 1 FROM adv_warehouses WHERE user_id=? AND warehouse_id=? AND active=1",
                              (user,body.warehouseId)).fetchone():
                 raise HTTPException(404,"Warehouse not found in this account")
@@ -700,7 +708,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                 previous_result = json.loads(replay["result"])
                 previous_result["status"] = "duplicate"
                 return previous_result
-            order=c.execute("SELECT order_type,status FROM business_orders WHERE user_id=? AND order_id=?",
+            order=c.execute("SELECT order_type,status,payload FROM business_orders WHERE user_id=? AND order_id=?",
                             (user,order_id)).fetchone()
             if not order: raise HTTPException(404,"Sales order not found in this account")
             if order["order_type"]!="SALES" or order["status"]!="CONFIRMED":
@@ -709,15 +717,31 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
               WHERE user_id=? AND reference_type='SALES_ORDER' AND reference_id=? AND state='ACTIVE'
               ORDER BY created_at,reservation_id""",(user,order_id)).fetchall()
             if not reservations: raise HTTPException(409,"No active FEFO reservations exist for this order")
-            shipped=[]
+
+            required_by_product = {}
+            for line in decrypt_payload(order["payload"]).get("lines", []):
+                product_id = line["productId"]
+                required_by_product[product_id] = required_by_product.get(product_id, Decimal("0")) + amount(line["quantity"])
+            reserved_by_product = {}
+            prepared = []
+            today = time.strftime("%Y-%m-%d", time.gmtime())
             for reservation in reservations:
                 lot=c.execute("SELECT product_id,quality_state,expiry_date FROM adv_lots WHERE user_id=? AND lot_id=?",
                               (user,reservation["lot_id"])).fetchone()
                 if not lot or lot["quality_state"]!="RELEASED":
                     raise HTTPException(409,"A reserved lot is no longer released")
-                if lot["expiry_date"] and lot["expiry_date"]<time.strftime("%Y-%m-%d",time.gmtime()):
+                if lot["expiry_date"] and lot["expiry_date"]<today:
                     raise HTTPException(409,"Expired lot cannot be shipped")
-                q=Decimal(reservation["quantity"]); on_hand=balance(c,user,reservation["warehouse_id"],reservation["lot_id"])
+                quantity = Decimal(reservation["quantity"])
+                product_id = lot["product_id"]
+                reserved_by_product[product_id] = reserved_by_product.get(product_id, Decimal("0")) + quantity
+                prepared.append((reservation, lot, quantity))
+            if reserved_by_product != required_by_product:
+                raise HTTPException(409, "Active inventory reservations must exactly match sales order quantities")
+
+            shipped=[]
+            for reservation, lot, q in prepared:
+                on_hand=balance(c,user,reservation["warehouse_id"],reservation["lot_id"])
                 if on_hand<q: raise HTTPException(409,"Reserved stock is no longer available")
                 write_balance(c,user,reservation["warehouse_id"],reservation["lot_id"],on_hand-q,now)
                 move=movement(c,user,body.idempotencyKey+":"+reservation["reservation_id"],
