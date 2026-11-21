@@ -404,9 +404,18 @@ def test_sales_order_fefo_fulfillment_posts_lot_movements_against_order():
     assert order.status_code == 200, order.text
     received = lot(h,p,w,"sales-fefo-lot-001","SALES-FEFO-LOT","5")
     release(h,received["lotId"])
+    reserve_body = {"idempotencyKey":"order-fefo-reserve-001","warehouseId":w}
     reserved = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/fefo-reservations",
-                           headers=h,json={"idempotencyKey":"order-fefo-reserve-001","warehouseId":w})
+                           headers=h,json=reserve_body)
     assert reserved.status_code == 200, reserved.text
+    replay = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/fefo-reservations",
+                         headers=h,json=reserve_body)
+    assert replay.status_code == 200 and replay.json()["status"] == "duplicate"
+    assert replay.json()["allocations"] == reserved.json()["allocations"]
+    second_reservation = client.post(
+        f"/v2/erp/inventory/orders/{order.json()['id']}/fefo-reservations",
+        headers=h,json={"idempotencyKey":"order-fefo-reserve-002","warehouseId":w})
+    assert second_reservation.status_code == 409, second_reservation.text
     confirmed = client.post(f"/v1/erp/orders/{order.json()['id']}/transition", headers=h,
                             json={"action":"CONFIRM","idempotencyKey":"confirm-sales-fefo-001"})
     assert confirmed.status_code == 200 and confirmed.json()["status"] == "CONFIRMED"
@@ -821,3 +830,34 @@ def test_quality_status_change_requires_separate_human_approval():
         headers={**h,"X-Approval-Token":os.environ["MOLIDO_INVENTORY_APPROVAL_TOKEN"]},
         json={"state":"RELEASED","reason":"Inspection passed"})
     assert approved.status_code == 200, approved.text
+
+def test_sales_order_fulfillment_rejects_partial_inventory_reservations():
+    h = account("salesorderpartialreserve")
+    customer = client.post("/v1/crm/customers", headers=h, json={"name":"Partial Reserve Customer"})
+    p = product(h, "CUC-SALES-PARTIAL")
+    w = warehouse(h, "SALES-PARTIAL")
+    order = client.post("/v1/erp/sales/orders", headers=h, json={
+        "partyId": customer.json()["id"],
+        "lines": [{"productId": p, "quantity": 5, "unitPrice": 100}],
+    })
+    assert order.status_code == 200, order.text
+    received = lot(h, p, w, "sales-partial-lot-001", "SALES-PARTIAL-LOT", "10")
+    release(h, received["lotId"])
+    partial = client.post("/v2/erp/inventory/reservations", headers=h, json={
+        "idempotencyKey": "sales-partial-reserve-001", "lotId": received["lotId"],
+        "warehouseId": w, "referenceType": "SALES_ORDER", "referenceId": order.json()["id"],
+        "quantity": "4",
+    })
+    assert partial.status_code == 200, partial.text
+    confirmed = client.post(f"/v1/erp/orders/{order.json()['id']}/transition", headers=h,
+                            json={"action": "CONFIRM", "idempotencyKey": "sales-partial-confirm-001"})
+    assert confirmed.status_code == 200, confirmed.text
+    blocked = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/fulfill", headers=h,
+                          json={"idempotencyKey": "sales-partial-fulfill-001"})
+    assert blocked.status_code == 409, blocked.text
+    balance_row = next(
+        row for row in client.get("/v2/erp/inventory/balances", headers=h).json()["items"]
+        if row["lotId"] == received["lotId"]
+    )
+    assert Decimal(balance_row["quantity"]) == Decimal("10")
+
