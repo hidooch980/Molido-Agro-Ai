@@ -5,11 +5,24 @@ import os
 import secrets
 import time
 import uuid
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
 from fastapi import Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
+
+
+def _validate_iso_date(value: str | None) -> str | None:
+    if value is None:
+        return value
+    try:
+        parsed = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise ValueError("date must use valid YYYY-MM-DD format")
+    if parsed.isoformat() != value:
+        raise ValueError("date must use valid YYYY-MM-DD format")
+    return value
 
 
 class FefoReserveInput(BaseModel):
@@ -76,6 +89,11 @@ class PurchaseReceiptLine(BaseModel):
     expiryDate: str | None = None
     receivedDate: str | None = None
 
+    @field_validator("expiryDate", "receivedDate")
+    @classmethod
+    def valid_receipt_dates(cls, value: str | None) -> str | None:
+        return _validate_iso_date(value)
+
 
 class PurchaseReceiptInput(BaseModel):
     idempotencyKey: str = Field(min_length=8, max_length=200)
@@ -89,6 +107,11 @@ class HarvestLotInput(BaseModel):
     warehouseId: str = Field(min_length=1, max_length=200)
     lotCode: str = Field(min_length=1, max_length=100)
     expiryDate: str | None = None
+
+    @field_validator("expiryDate")
+    @classmethod
+    def valid_harvest_expiry(cls, value: str | None) -> str | None:
+        return _validate_iso_date(value)
 
 
 def register_advanced_inventory_control_routes(app, db, current_user, decrypt_payload, encrypt_payload) -> None:
@@ -587,7 +610,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                 if replay["reservation_id"] != order_id or replay["action"] != "ORDER_FEFO_RESERVE":
                     raise HTTPException(409, "Idempotency key already belongs to a different order action")
                 previous_result = json.loads(replay["result"])
-                if previous_result.get("warehouseId") != body.warehouseId:
+                if "warehouseId" in previous_result and previous_result["warehouseId"] != body.warehouseId:
                     raise HTTPException(409, "Idempotency key already belongs to a different warehouse")
                 previous_result["status"] = "duplicate"
                 return previous_result
