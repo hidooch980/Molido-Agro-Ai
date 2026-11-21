@@ -403,6 +403,74 @@ def test_purchase_order_receipt_creates_inspection_lots_and_links_supplier_order
 
 
 
+def test_purchase_receipt_idempotency_rejects_changed_request():
+    h = account("purchaseidempotency")
+    supplier = client.post("/v1/erp/suppliers",headers=h,json={"name":"Idempotency Supplier"})
+    p = product(h,"CUC-PURCHASE-IDEM")
+    w = warehouse(h,"PURCHASE-IDEM")
+    order = client.post("/v1/erp/purchase/orders",headers=h,json={
+        "partyId":supplier.json()["id"],"lines":[{"productId":p,"quantity":12,"unitPrice":50}]
+    })
+    assert order.status_code == 200, order.text
+    confirmed = client.post(f"/v1/erp/orders/{order.json()['id']}/transition",headers=h,
+                            json={"action":"CONFIRM","idempotencyKey":"confirm-purchase-idem-01"})
+    assert confirmed.status_code == 200, confirmed.text
+    body = {"idempotencyKey":"purchase-receipt-idem-01","warehouseId":w,
+            "lines":[{"productId":p,"lotCode":"PO-IDEM-001","quantity":"12",
+                      "unit":"kg","receivedDate":"2026-11-21","expiryDate":"2027-01-01"}]}
+    first = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/purchase-receipts",headers=h,json=body)
+    assert first.status_code == 200, first.text
+    duplicate = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/purchase-receipts",headers=h,json=body)
+    assert duplicate.status_code == 200 and duplicate.json()["status"] == "duplicate"
+    changed = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/purchase-receipts",
+        headers=h,json={**body,"lines":[{**body["lines"][0],"lotCode":"PO-IDEM-CHANGED"}]})
+    assert changed.status_code == 409, changed.text
+    foreign_order = client.post("/v1/erp/purchase/orders",headers=h,json={
+        "partyId":supplier.json()["id"],"lines":[{"productId":p,"quantity":12,"unitPrice":50}]
+    })
+    assert foreign_order.status_code == 200
+    conflict = client.post(f"/v2/erp/inventory/orders/{foreign_order.json()['id']}/purchase-receipts",
+                           headers=h,json=body)
+    assert conflict.status_code == 409, conflict.text
+    balances = client.get("/v2/erp/inventory/balances",headers=h).json()["items"]
+    assert sum(Decimal(row["quantity"]) for row in balances) == Decimal("12")
+
+
+def test_harvest_receipt_idempotency_rejects_changed_harvest_or_destination():
+    h = account("harvestidempotency")
+    gh = "gh-harvest-idem-01"
+    cycle = "cycle-harvest-idem-01"
+    sync = client.post("/v1/sync/push",headers=h,json={"operations":[
+        {"idempotencyKey":"gh-harvest-idem-create","entityType":"greenhouse","entityId":gh,
+         "operation":"CREATE","payload":{"name":"Harvest Idempotency"},"baseVersion":0},
+        {"idempotencyKey":"cycle-harvest-idem-create","entityType":"crop_cycle","entityId":cycle,
+         "operation":"CREATE","payload":{"greenhouseId":gh,"cropCode":"CUCUMBER"},"baseVersion":0}
+    ]})
+    assert sync.status_code == 200, sync.text
+    p = product(h,"CUC-HARVEST-IDEM")
+    first_harvest = client.post("/v1/erp/greenhouse/harvests",headers=h,json={
+        "greenhouseId":gh,"cropCycleId":cycle,"productId":p,"warehouseId":"main",
+        "quantity":10,"unitPrice":200,"unit":"kg"
+    })
+    second_harvest = client.post("/v1/erp/greenhouse/harvests",headers=h,json={
+        "greenhouseId":gh,"cropCycleId":cycle,"productId":p,"warehouseId":"main",
+        "quantity":5,"unitPrice":200,"unit":"kg"
+    })
+    assert first_harvest.status_code == 200 and second_harvest.status_code == 200
+    w = warehouse(h,"HARVEST-IDEM")
+    body = {"idempotencyKey":"harvest-receipt-idem-01","harvestId":first_harvest.json()["id"],
+            "warehouseId":w,"lotCode":"HARVEST-IDEM-001","expiryDate":"2026-12-15"}
+    first = client.post("/v2/erp/inventory/harvest-receipts",headers=h,json=body)
+    assert first.status_code == 200, first.text
+    duplicate = client.post("/v2/erp/inventory/harvest-receipts",headers=h,json=body)
+    assert duplicate.status_code == 200 and duplicate.json()["status"] == "duplicate"
+    changed_harvest = client.post("/v2/erp/inventory/harvest-receipts",headers=h,json={**body,"harvestId":second_harvest.json()["id"]})
+    assert changed_harvest.status_code == 409, changed_harvest.text
+    changed_lot = client.post("/v2/erp/inventory/harvest-receipts",headers=h,json={**body,"lotCode":"HARVEST-IDEM-CHANGED"})
+    assert changed_lot.status_code == 409, changed_lot.text
+    assert client.get("/v2/erp/inventory/balances",headers=h).json()["items"][0]["quantity"] == "10"
+
+
 def test_harvest_lot_sales_shipment_and_crop_cost_reconcile_end_to_end():
     h = account("harvestcogs")
     gh = "gh-cogs-001"
