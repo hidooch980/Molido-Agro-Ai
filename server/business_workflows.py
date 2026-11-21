@@ -277,10 +277,12 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
                         for line in lines:
                             product_id=line["productId"]
                             required_by_product[product_id]=required_by_product.get(product_id,Decimal("0"))+Decimal(str(line["quantity"]))
-                        for product_id,required_qty in required_by_product.items():
-                            reserved_qty=sum((Decimal(r["quantity"]) for r in advanced_rows if r["product_id"]==product_id),Decimal("0"))
-                            if reserved_qty < required_qty:
-                                raise HTTPException(409,"Advanced lot reservations do not cover every sales order line")
+                        reserved_by_product={}
+                        for row in advanced_rows:
+                            product_id=row["product_id"]
+                            reserved_by_product[product_id]=reserved_by_product.get(product_id,Decimal("0"))+Decimal(str(row["quantity"]))
+                        if reserved_by_product != required_by_product:
+                            raise HTTPException(409,"Advanced lot reservations must exactly match every sales order line")
                     else:
                         for line in lines:
                             warehouse="main"
