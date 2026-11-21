@@ -61,6 +61,11 @@ class QualityInput(BaseModel):
     evidenceRef: str | None = Field(default=None, max_length=500)
 
 
+class ReservationActionInput(BaseModel):
+    idempotencyKey: str = Field(min_length=8, max_length=200)
+    action: Literal["RELEASE", "FULFILL"]
+
+
 def register_advanced_inventory_routes(app, db, current_user) -> None:
     def schema(c):
         c.executescript("""
@@ -100,6 +105,12 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
           event_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, lot_id TEXT NOT NULL,
           from_state TEXT NOT NULL, to_state TEXT NOT NULL, reason TEXT NOT NULL,
           evidence_ref TEXT, actor_id TEXT NOT NULL, created_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS adv_reservation_actions(
+          user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, reservation_id TEXT NOT NULL,
+          action TEXT NOT NULL, result TEXT NOT NULL, created_at INTEGER NOT NULL,
+          PRIMARY KEY(user_id,idempotency_key)
         );
         CREATE INDEX IF NOT EXISTS idx_adv_lots_expiry ON adv_lots(user_id,expiry_date);
         CREATE INDEX IF NOT EXISTS idx_adv_movements_lot ON adv_stock_movements(user_id,lot_id,created_at);
@@ -219,7 +230,8 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
             if not lot: raise HTTPException(404,"Lot not found in this account")
             if lot["quality_state"] != "RELEASED": raise HTTPException(409,"Only released lots can be transferred")
             source=balance(c,user,body.sourceWarehouseId,body.lotId)
-            if source < amount: raise HTTPException(409,"Insufficient lot stock")
+            reserved=sum((Decimal(r["quantity"]) for r in c.execute("SELECT quantity FROM adv_reservations WHERE user_id=? AND warehouse_id=? AND lot_id=? AND state='ACTIVE'",(user,body.sourceWarehouseId,body.lotId)).fetchall()),Decimal("0"))
+            if source-reserved < amount: raise HTTPException(409,"Insufficient unreserved lot stock")
             write_balance(c,user,body.sourceWarehouseId,body.lotId,source-amount,now)
             dest=balance(c,user,body.destinationWarehouseId,body.lotId)
             write_balance(c,user,body.destinationWarehouseId,body.lotId,dest+amount,now)
@@ -259,6 +271,34 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
             c.execute("INSERT INTO adv_quality_events VALUES(?,?,?,?,?,?,?,?,?)",
               (uuid.uuid4().hex,user,lot_id,old,body.state,body.reason,body.evidenceRef,user,now))
         return {"lotId":lot_id,"previousState":old,"qualityState":body.state,"changedAtEpochMillis":now}
+
+    @app.post("/v2/erp/inventory/reservations/{reservation_id}/actions")
+    def act_on_reservation(reservation_id: str, body: ReservationActionInput, authorization: str | None = Header(default=None)):
+        user=actor(authorization); now=int(time.time()*1000)
+        with db() as c:
+            schema(c); c.execute("BEGIN IMMEDIATE")
+            previous=c.execute("SELECT result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
+            if previous: return json.loads(previous["result"])
+            reservation=c.execute("SELECT * FROM adv_reservations WHERE user_id=? AND reservation_id=?",(user,reservation_id)).fetchone()
+            if not reservation: raise HTTPException(404,"Reservation not found in this account")
+            if reservation["state"] != "ACTIVE": raise HTTPException(409,"Only active reservations can be changed")
+            result={"reservationId":reservation_id,"action":body.action.lower()}
+            if body.action == "RELEASE":
+                c.execute("UPDATE adv_reservations SET state='RELEASED' WHERE user_id=? AND reservation_id=? AND state='ACTIVE'",(user,reservation_id))
+                result["status"]="released"
+            else:
+                lot=c.execute("SELECT product_id,quality_state,expiry_date FROM adv_lots WHERE user_id=? AND lot_id=?",(user,reservation["lot_id"])).fetchone()
+                if not lot: raise HTTPException(404,"Lot not found in this account")
+                if lot["quality_state"] != "RELEASED": raise HTTPException(409,"Lot is not released for fulfillment")
+                if lot["expiry_date"] and lot["expiry_date"] < time.strftime("%Y-%m-%d",time.gmtime()): raise HTTPException(409,"Expired lot cannot be fulfilled")
+                amount=Decimal(reservation["quantity"]); on_hand=balance(c,user,reservation["warehouse_id"],reservation["lot_id"])
+                if on_hand < amount: raise HTTPException(409,"Reserved stock is no longer available")
+                write_balance(c,user,reservation["warehouse_id"],reservation["lot_id"],on_hand-amount,now)
+                movement=record(c,user,body.idempotencyKey,"ISSUE",reservation["lot_id"],lot["product_id"],reservation["warehouse_id"],None,amount,user,now,reservation["reference_type"],reservation["reference_id"])
+                c.execute("UPDATE adv_reservations SET state='FULFILLED' WHERE user_id=? AND reservation_id=? AND state='ACTIVE'",(user,reservation_id))
+                result.update({"status":"fulfilled","movementId":movement,"quantity":format(amount,"f")})
+            c.execute("INSERT INTO adv_reservation_actions VALUES(?,?,?,?,?,?)",(user,body.idempotencyKey,reservation_id,body.action,json.dumps(result,separators=(",",":")),now))
+        return result
 
     @app.get("/v2/erp/inventory/balances")
     def advanced_balances(authorization: str | None = Header(default=None)):
