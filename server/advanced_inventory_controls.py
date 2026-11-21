@@ -418,7 +418,8 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                                   (user,line["lot_id"])).fetchone()
                     write_balance(c,user,warehouse,line["lot_id"],counted,now)
                     move=movement(c,user,body.idempotencyKey+":"+line["lot_id"],
-                                  "COUNT_ADJUSTMENT",line["lot_id"],lot["product_id"],warehouse,
+                                  ("COUNT_INCREASE" if delta > 0 else "COUNT_DECREASE"),
+                                  line["lot_id"],lot["product_id"],warehouse,
                                   abs(delta),"CYCLE_COUNT",document_id,now)
                     results.append({"lotId":line["lot_id"],"variance":format(delta,"f"),"movementId":move})
             result={"status":"posted","documentId":document_id,"adjustments":results}
