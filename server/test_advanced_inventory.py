@@ -135,3 +135,60 @@ def test_quarantine_prevents_reservation_and_release_is_audited():
         "referenceType": "SALES_ORDER", "referenceId": "order-2", "quantity": "1"
     })
     assert reserved.status_code == 409
+
+
+def test_reservation_release_and_fulfillment_are_idempotent_and_preserve_stock():
+    h = account("reservationactions")
+    p = product(h, "CUC-RES-ACT")
+    w = warehouse(h, "RES-ACT")
+    received = lot(h, p, w, key="lot-res-action-01", code="LOT-RES-ACT", quantity="20")
+    release(h, received["lotId"])
+    reserved = client.post("/v2/erp/inventory/reservations", headers=h, json={
+        "idempotencyKey": "reserve-res-action-01", "lotId": received["lotId"], "warehouseId": w,
+        "referenceType": "SALES_ORDER", "referenceId": "SO-RES-1", "quantity": "7"
+    })
+    assert reserved.status_code == 200, reserved.text
+    rid = reserved.json()["reservationId"]
+    blocked_transfer = client.post("/v2/erp/inventory/transfers", headers=h, json={
+        "idempotencyKey": "transfer-reserved-01", "lotId": received["lotId"],
+        "sourceWarehouseId": w, "destinationWarehouseId": warehouse(h, "RES-DEST"), "quantity": "14"
+    })
+    assert blocked_transfer.status_code == 409
+    fulfilled = client.post(f"/v2/erp/inventory/reservations/{rid}/actions", headers=h, json={
+        "idempotencyKey": "fulfill-res-action-01", "action": "FULFILL"
+    })
+    assert fulfilled.status_code == 200, fulfilled.text
+    assert fulfilled.json()["status"] == "fulfilled"
+    duplicate = client.post(f"/v2/erp/inventory/reservations/{rid}/actions", headers=h, json={
+        "idempotencyKey": "fulfill-res-action-01", "action": "FULFILL"
+    })
+    assert duplicate.status_code == 200 and duplicate.json() == fulfilled.json()
+    balances = client.get("/v2/erp/inventory/balances", headers=h).json()["items"]
+    row = next(x for x in balances if x["lotId"] == received["lotId"])
+    assert row["quantity"] == "13"
+
+
+def test_reservation_release_restores_available_quantity_without_moving_stock():
+    h = account("reservationrelease")
+    p = product(h, "CUC-RES-REL")
+    w = warehouse(h, "RES-REL")
+    received = lot(h, p, w, key="lot-res-release-01", code="LOT-RES-REL", quantity="9")
+    release(h, received["lotId"])
+    reserved = client.post("/v2/erp/inventory/reservations", headers=h, json={
+        "idempotencyKey": "reserve-res-release-01", "lotId": received["lotId"], "warehouseId": w,
+        "referenceType": "SALES_ORDER", "referenceId": "SO-RES-2", "quantity": "5"
+    })
+    rid = reserved.json()["reservationId"]
+    released = client.post(f"/v2/erp/inventory/reservations/{rid}/actions", headers=h, json={
+        "idempotencyKey": "release-res-action-01", "action": "RELEASE"
+    })
+    assert released.status_code == 200 and released.json()["status"] == "released"
+    duplicate = client.post(f"/v2/erp/inventory/reservations/{rid}/actions", headers=h, json={
+        "idempotencyKey": "release-res-action-01", "action": "RELEASE"
+    })
+    assert duplicate.status_code == 200 and duplicate.json() == released.json()
+    reserve_again = client.post("/v2/erp/inventory/reservations", headers=h, json={
+        "idempotencyKey": "reserve-res-release-02", "lotId": received["lotId"], "warehouseId": w,
+        "referenceType": "SALES_ORDER", "referenceId": "SO-RES-3", "quantity": "9"
+    })
+    assert reserve_again.status_code == 200, reserve_again.text
