@@ -10,11 +10,11 @@ on:
   schedule:
     - cron: '23 2 * * *'
   pull_request:
-    branches: [main]
+    branches: [foundation/android-release-foundation]
   push:
     branches: [feature/bughunter-autofix-agent]
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: bughunter-${{ github.ref }}
   cancel-in-progress: false
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          persist-credentials: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -44,7 +44,7 @@ jobs:
         id: bughunter
         continue-on-error: true
         env:
-          APPLY_SAFE_FIXES: ${{ inputs.apply_safe_fixes || 'false' }}
+          APPLY_SAFE_FIXES: ${{ github.event_name == 'push' || github.event_name == 'schedule' || inputs.apply_safe_fixes == true }}
         run: |
           set -euo pipefail
           args=(--report-dir artifacts/bughunter)
@@ -61,3 +61,34 @@ jobs:
       - name: Mark failing diagnostics
         if: steps.bughunter.outcome == 'failure'
         run: exit 1
+
+      - name: Commit verified safe Python fixes
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/feature/bughunter-autofix-agent'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -t changed_files < <(python - <<'PY'
+          import json
+          from pathlib import PurePosixPath
+          report = json.load(open("artifacts/bughunter/bughunter-report.json", encoding="utf-8"))
+          fixes = report.get("safe_fixes", {})
+          if report.get("overall") != "passed" or fixes.get("status") != "completed":
+              raise SystemExit(0)
+          files = fixes.get("changed_files", [])
+          for name in files:
+              path = PurePosixPath(name)
+              if path.is_absolute() or ".." in path.parts or not path.parts or path.parts[0] != "server" or path.suffix != ".py":
+                  raise SystemExit("Refusing to stage an out-of-scope path: " + name)
+          print("\\n".join(sorted(set(files))))
+          PY
+          )
+          if (( ${#changed_files[@]} > 0 )); then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -- "${changed_files[@]}"
+            if ! git diff --cached --quiet; then
+              git commit -m "chore(bughunter): apply tested safe Python fixes [skip ci]"
+              git push origin HEAD:feature/bughunter-autofix-agent
+            fi
+          fi
