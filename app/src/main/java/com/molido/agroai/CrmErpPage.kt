@@ -32,7 +32,7 @@ private val businessKinds = listOf(
 )
 
 @Composable
-fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
+fun CrmErpPage(accountId: String?, legacyRecords: List<com.molido.agroai.data.BusinessRecordEntity>, onLegacySave: (String, String, String, Double) -> Unit, onNotice: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var selected by remember { mutableStateOf("CUSTOMER") }
@@ -48,6 +48,7 @@ fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
     var description by remember { mutableStateOf("") }
     var quantity by remember { mutableStateOf("1") }
     var price by remember { mutableStateOf("0") }
+    var showLegacyRecords by remember { mutableStateOf(false) }
 
     LaunchedEffect(accountId) {
         records = emptyList()
@@ -83,7 +84,14 @@ fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
         }
     }
 
+    if (showLegacyRecords) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            TextButton(onClick = { showLegacyRecords = false }) { Text("بازگشت به CRM/ERP") }
+            BusinessPage(legacyRecords, onLegacySave)
+        }
+    } else {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        TextButton(onClick = { showLegacyRecords = true }) { Text("سوابق عمومی قدیمی") }
         Text("مدیریت مشتری و کسب‌وکار", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text("ثبت آفلاین با رمزگذاری محلی؛ ارسال خودکار پس از اتصال امن به سرور", style = MaterialTheme.typography.bodySmall)
         if (accountId.isNullOrBlank()) {
@@ -195,5 +203,6 @@ fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
                 }
             }
         }
+    }
     }
 }
