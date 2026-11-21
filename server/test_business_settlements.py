@@ -2,6 +2,7 @@ import base64
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import uuid
 
 DB = Path("/tmp/molido-business-settlement-tests.sqlite3")
 if DB.exists():
@@ -17,7 +18,7 @@ client = TestClient(app_module.app)
 
 def setup_delivered_sales_order():
     auth = client.post("/v1/auth/register", json={
-        "username": "settlementUser", "password": "Strong-test-password-123"
+        "username": "settlementUser-" + uuid.uuid4().hex[:10], "password": "Strong-test-password-123"
     })
     assert auth.status_code == 200, auth.text
     h = {"Authorization": "Bearer " + auth.json()["accessToken"]}
