@@ -367,7 +367,7 @@ def test_customer_and_supplier_returns_require_approval_and_keep_ledger_history(
     supplier = client.post("/v2/erp/inventory/returns", headers=h, json={
         "idempotencyKey":"supplier-return-001","direction":"SUPPLIER_RETURN",
         "lotId":received["lotId"],"warehouseId":w,"quantity":"4",
-        "referenceId":"PO-RETURN-1","reason":"Supplier quality claim",
+        "referenceId":"supplier-1","reason":"Supplier quality claim",
         "accountingAmount":"200","currency":"IRR"
     })
     assert supplier.status_code == 200
