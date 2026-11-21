@@ -30,12 +30,13 @@ class MainActivityUiTest {
     fun crmErpWorkspaceIsAvailableInPersianNavigation() {
         composeRule.onNodeWithText("CRM/ERP").performClick()
         composeRule.onNodeWithText("مدیریت مشتری و کسب‌وکار").assertIsDisplayed()
-        composeRule.onNodeWithText("ثبت مشتری").assertIsDisplayed()
+        composeRule.onNodeWithText("برای نگهداری اطلاعات خصوصی، ابتدا وارد حساب شوید.").assertIsDisplayed()
     }
 
     @Test
     fun legacyBusinessRecordsRemainReachable() {
-        composeRule.onNodeWithText("سجلات").performClick()
+        composeRule.onNodeWithText("CRM/ERP").performClick()
+        composeRule.onNodeWithText("سوابق عمومی قدیمی").performClick()
         composeRule.onNodeWithText("مدیریت یکپارچه CRM و ERP").assertIsDisplayed()
         composeRule.onNodeWithText("ذخیره محلی و افزودن به صف همگام‌سازی").assertIsDisplayed()
     }
