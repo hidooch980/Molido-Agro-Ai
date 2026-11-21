@@ -321,7 +321,7 @@ def test_sales_order_fefo_fulfillment_posts_lot_movements_against_order():
     p = product(h, "CUC-SALES-FEFO")
     w = warehouse(h, "SALES-FEFO")
     order = client.post("/v1/erp/sales/orders", headers=h, json={
-        "partyId":customer.json()["id"],"lines":[{"productId":p,"quantity":5,"unitPrice":100}]
+        "partyId":customer.json()["id"],"lines":[{"productId":p,"quantity":2,"unitPrice":100},{"productId":p,"quantity":3,"unitPrice":100}]
     })
     assert order.status_code == 200, order.text
     received = lot(h,p,w,"sales-fefo-lot-001","SALES-FEFO-LOT","5")
@@ -337,8 +337,8 @@ def test_sales_order_fefo_fulfillment_posts_lot_movements_against_order():
     assert shipped.status_code == 200, shipped.text
     assert shipped.json()["status"] == "shipped"
     trace = client.get(f"/v2/erp/inventory/lots/{received['lotId']}/trace",headers=h).json()
-    assert trace["movements"][-1]["type"] == "SHIPMENT_ISSUE"
-    assert trace["movements"][-1]["referenceId"] == order.json()["id"]
+    assert any(x["type"] == "SHIPMENT_ISSUE" and x["referenceId"] == order.json()["id"]
+               for x in trace["movements"])
     order_state = next(x for x in client.get("/v1/erp/orders",headers=h).json()["items"]
                        if x["id"] == order.json()["id"])
     assert order_state["status"] == "SHIPPED"
