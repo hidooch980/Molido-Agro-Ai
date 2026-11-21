@@ -71,6 +71,9 @@ def register_approval_ledger_routes(app, db, current_user, encrypt_payload, decr
         journal_id = uuid.uuid4().hex
         with db() as c:
             setup(c, uid)
+            # setup() seeds account rows, which opens an implicit SQLite transaction.
+            # Commit that initialization before starting the explicit write transaction.
+            c.commit()
             c.execute("BEGIN IMMEDIATE")
             for line in body.lines:
                 if not c.execute("SELECT 1 FROM approval_ledger_accounts WHERE user_id=? AND account_code=? AND active=1", (uid, line.accountCode)).fetchone():
