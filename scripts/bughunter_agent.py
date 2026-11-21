@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RULES = {
+ 'test_harness_path': re.compile(r"can't open file|FileNotFoundError|No such file or directory|NameError: name 'Path' is not defined", re.I),
  'dependency': re.compile(r'ModuleNotFoundError|No module named|Could not resolve', re.I),
  'assertion': re.compile(r'AssertionError|assert ', re.I),
  'migration': re.compile(r'migration|sqlite|no such table|no such column', re.I),
@@ -20,6 +21,7 @@ class Check:
  duration_seconds: float; diagnosis: list[str]; output_tail: str
 def classify(output: str) -> list[str]:
  found = [name for name, pattern in RULES.items() if pattern.search(output)]
+ if 'test_harness_path' in found: return ['test_harness_path']
  return found or ['unclassified_failure']
 def run_check(name: str, command: list[str], timeout: int) -> Check:
  started = time.monotonic()
