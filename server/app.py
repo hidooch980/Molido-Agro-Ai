@@ -75,7 +75,7 @@ class Credentials(BaseModel):
     password: str = Field(min_length=12,max_length=256)
 class Operation(BaseModel):
     idempotencyKey: str = Field(min_length=1,max_length=200)
-    entityType: Literal["greenhouse", "crop_cycle", "farm_activity", "inventory_item", "financial_entry", "customer", "supplier", "product", "sales_order", "purchase_order", "inventory_movement", "crm_activity", "crm_lead", "crm_followup", "support_ticket", "inventory_reservation", "harvest_batch", "journal_entry", "settlement"]
+    entityType: Literal["greenhouse", "crop_cycle", "farm_activity", "inventory_item", "financial_entry", "customer", "supplier", "product", "sales_order", "purchase_order", "inventory_movement", "crm_activity", "crm_lead", "crm_followup", "support_ticket", "inventory_reservation", "harvest", "harvest_batch", "journal_entry", "settlement"]
     entityId: str = Field(min_length=1,max_length=200)
     operation: str = Field(pattern=r"^(CREATE|UPDATE|DELETE)$")
     payload: dict[str,Any] = Field(default_factory=dict)
