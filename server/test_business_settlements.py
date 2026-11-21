@@ -27,6 +27,7 @@ def setup_delivered_sales_order():
         "sku": "SETTLE-001", "name": "Cucumber", "unit": "kg", "salePrice": 100, "purchasePrice": 50
     }).json()
     stock = client.post("/v1/erp/inventory/movements", headers=h, json={
+        "idempotencyKey": "settlement-stock-" + uuid.uuid4().hex,
         "productId": product["id"], "warehouseId": "main", "movementType": "RECEIPT", "quantity": 10
     })
     assert stock.status_code == 200, stock.text
