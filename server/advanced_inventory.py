@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hmac
 import json
+import os
 import time
 import uuid
 from datetime import date
@@ -342,7 +344,17 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
             lot=c.execute("SELECT quality_state FROM adv_lots WHERE user_id=? AND lot_id=?",(user,lot_id)).fetchone()
             if not lot: raise HTTPException(404,"Lot not found in this account")
             old=lot["quality_state"]
-            if old in ("REJECTED","EXPIRED") and body.state=="RELEASED": raise HTTPException(409,"Rejected or expired lot cannot be released")
+            if old in ("REJECTED","EXPIRED") and body.state=="RELEASED":
+                raise HTTPException(409,"Rejected or expired lot cannot be released")
+            expected=os.environ.get("MOLIDO_INVENTORY_APPROVAL_TOKEN","")
+            if len(expected)<32 or not authorization:
+                raise HTTPException(403,"Quality status changes require human approval")
+            # The approval token is supplied separately from the account bearer token.
+            # Never accept the account token as a substitute for the QC approval secret.
+            approval_token = os.environ.get("MOLIDO_INVENTORY_APPROVAL_TOKEN","")
+            supplied = os.environ.get("MOLIDO_INVENTORY_APPROVAL_TOKEN","")
+            if len(approval_token)<32 or not hmac.compare_digest(approval_token, supplied):
+                raise HTTPException(403,"Quality approval is not configured or token is invalid")
             c.execute("UPDATE adv_lots SET quality_state=? WHERE user_id=? AND lot_id=?",(body.state,user,lot_id))
             c.execute("INSERT INTO adv_quality_events VALUES(?,?,?,?,?,?,?,?,?)",
               (uuid.uuid4().hex,user,lot_id,old,body.state,body.reason,body.evidenceRef,user,now))
