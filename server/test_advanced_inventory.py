@@ -389,6 +389,24 @@ def test_customer_and_supplier_returns_require_approval_and_keep_ledger_history(
     assert Decimal(trace["balances"][0]["quantity"]) == Decimal("6")
 
 
+def test_supplier_return_rejects_greenhouse_sourced_lots():
+    h = account("supplierreturnsource")
+    p = product(h,"CUC-SUPPLIER-RETURN-SOURCE")
+    w = warehouse(h,"SUPPLIER-RETURN-SOURCE")
+    received = client.post("/v2/erp/inventory/lots",headers=h,json={
+        "idempotencyKey":"greenhouse-source-lot-001","warehouseId":w,"productId":p,
+        "lotCode":"GREENHOUSE-SOURCE-LOT","quantity":"10","unit":"kg",
+        "receivedDate":"2026-11-21","sourceType":"GREENHOUSE","sourceId":"harvest-source-001"
+    })
+    assert received.status_code == 200, received.text
+    rejected = client.post("/v2/erp/inventory/returns",headers=h,json={
+        "idempotencyKey":"supplier-return-wrong-source-001","direction":"SUPPLIER_RETURN",
+        "lotId":received.json()["lotId"],"warehouseId":w,"quantity":"1",
+        "referenceId":"PO-UNRELATED-001","reason":"Attempt to return greenhouse harvest"
+    })
+    assert rejected.status_code == 409, rejected.text
+
+
 def test_scrap_and_cycle_count_are_approval_gated_and_idempotent():
     h = account("scrapcount")
     p = product(h, "CUC-SCRAP-COUNT")
