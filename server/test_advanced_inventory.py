@@ -60,14 +60,19 @@ def release(headers, lot_id):
     assert response.status_code == 200, response.text
 
 
-def test_fefo_reservation_route_is_registered_exactly_once():
-    matching = [
-        route for route in app_module.app.routes
-        if getattr(route, "path", None) == "/v2/erp/inventory/fefo/reservations"
-        and "POST" in getattr(route, "methods", set())
-    ]
-    assert len(matching) == 1
-    assert matching[0].endpoint.__name__ == "allocate_fefo"
+def test_fefo_reservation_endpoints_are_distinct_and_registered_once():
+    expected = {
+        "/v2/erp/inventory/fefo/reservations": "reserve_fefo",
+        "/v2/erp/inventory/fefo/allocate": "allocate_fefo",
+    }
+    for path, endpoint_name in expected.items():
+        matching = [
+            route for route in app_module.app.routes
+            if getattr(route, "path", None) == path
+            and "POST" in getattr(route, "methods", set())
+        ]
+        assert len(matching) == 1
+        assert matching[0].endpoint.__name__ == endpoint_name
 
 
 def test_lot_receipt_quality_reservation_and_fefo_listing():
