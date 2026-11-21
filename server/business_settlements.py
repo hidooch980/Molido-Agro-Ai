@@ -46,11 +46,22 @@ def register_settlement_routes(app, db, current_user, encrypt_payload):
         settlement_id = uuid.uuid4().hex
         with db() as c:
             ensure(c)
+            # Serialize balance checks and writes so concurrent settlements cannot
+            # both consume the same outstanding amount.
+            c.execute("BEGIN IMMEDIATE")
             replay = c.execute(
-                "SELECT settlement_id,order_id,amount,method,journal_id FROM business_settlements WHERE user_id=? AND idempotency_key=?",
+                "SELECT settlement_id,order_id,amount,method,reference,journal_id FROM business_settlements WHERE user_id=? AND idempotency_key=?",
                 (user, body.idempotencyKey),
             ).fetchone()
             if replay:
+                same_request = (
+                    replay["order_id"] == body.orderId
+                    and math.isclose(float(replay["amount"]), body.amount, rel_tol=0.0, abs_tol=0.000001)
+                    and replay["method"] == body.method
+                    and replay["reference"] == body.reference
+                )
+                if not same_request:
+                    raise HTTPException(409, "Idempotency key already belongs to a different settlement")
                 return {"id": replay["settlement_id"], "orderId": replay["order_id"],
                         "amount": replay["amount"], "method": replay["method"],
                         "journalId": replay["journal_id"], "status": "DUPLICATE"}

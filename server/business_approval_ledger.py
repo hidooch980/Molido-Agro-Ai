@@ -71,6 +71,7 @@ def register_approval_ledger_routes(app, db, current_user, encrypt_payload, decr
         journal_id = uuid.uuid4().hex
         with db() as c:
             setup(c, uid)
+            c.commit()
             c.execute("BEGIN IMMEDIATE")
             for line in body.lines:
                 if not c.execute("SELECT 1 FROM approval_ledger_accounts WHERE user_id=? AND account_code=? AND active=1", (uid, line.accountCode)).fetchone():
