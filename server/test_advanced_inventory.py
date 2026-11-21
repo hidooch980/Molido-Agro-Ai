@@ -429,3 +429,38 @@ def test_harvest_lot_sales_shipment_and_crop_cost_reconcile_end_to_end():
     delivered = client.post(f"/v1/erp/orders/{order.json()['id']}/transition",headers=h,
         json={"action":"DELIVER","idempotencyKey":"cogs-order-deliver-001"})
     assert delivered.status_code == 200 and delivered.json()["status"] == "DELIVERED"
+
+
+def test_fefo_allocator_uses_earliest_expiry_and_is_idempotent():
+    h = account("advancedfefo")
+    p = product(h, "CUC-FEFO-01")
+    w = warehouse(h, "FEFO")
+    early = client.post("/v2/erp/inventory/lots", headers=h, json={
+        "idempotencyKey": "fefo-receipt-early-01", "warehouseId": w, "productId": p,
+        "lotCode": "FEFO-EARLY", "quantity": "3", "unit": "kg",
+        "receivedDate": "2026-11-20", "expiryDate": "2026-12-10", "sourceType": "SUPPLIER"
+    })
+    late = client.post("/v2/erp/inventory/lots", headers=h, json={
+        "idempotencyKey": "fefo-receipt-late-001", "warehouseId": w, "productId": p,
+        "lotCode": "FEFO-LATE", "quantity": "8", "unit": "kg",
+        "receivedDate": "2026-11-20", "expiryDate": "2026-12-20", "sourceType": "SUPPLIER"
+    })
+    assert early.status_code == 200 and late.status_code == 200
+    release(h, early.json()["lotId"])
+    release(h, late.json()["lotId"])
+    body = {
+        "idempotencyKey": "fefo-allocation-order-01", "warehouseId": w, "productId": p,
+        "referenceType": "SALES_ORDER", "referenceId": "fefo-order-1", "quantity": "6"
+    }
+    allocated = client.post("/v2/erp/inventory/fefo/allocate", headers=h, json=body)
+    assert allocated.status_code == 200, allocated.text
+    data = allocated.json()
+    assert [x["lotId"] for x in data["allocations"]] == [early.json()["lotId"], late.json()["lotId"]]
+    assert [x["quantity"] for x in data["allocations"]] == ["3", "3"]
+    duplicate = client.post("/v2/erp/inventory/fefo/allocate", headers=h, json=body)
+    assert duplicate.status_code == 200 and duplicate.json()["status"] == "duplicate"
+    assert len(duplicate.json()["allocations"]) == 2
+    insufficient = client.post("/v2/erp/inventory/fefo/allocate", headers=h, json={
+        **body, "idempotencyKey": "fefo-allocation-order-02", "referenceId": "fefo-order-2", "quantity": "20"
+    })
+    assert insufficient.status_code == 409
