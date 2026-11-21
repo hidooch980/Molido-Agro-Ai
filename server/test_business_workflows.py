@@ -170,7 +170,7 @@ def test_order_transition_idempotency_key_is_bound_to_order_and_action():
 
     changed_order = transition(h, second_order["id"], "CONFIRM", key)
     assert changed_order.status_code == 409, changed_order.text
-    listed = client.get("/v1/erp/purchase/orders", headers=h)
+    listed = client.get("/v1/erp/orders", headers=h, params={"orderType": "PURCHASE"})
     assert listed.status_code == 200
     states = {item["id"]: item["status"] for item in listed.json()["items"]}
     assert states[first_order["id"]] == "CONFIRMED"
