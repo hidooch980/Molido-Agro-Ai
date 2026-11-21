@@ -710,9 +710,38 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            old=c.execute("SELECT document_id,state FROM adv_inventory_control_docs WHERE user_id=? AND idempotency_key=?",
+            old=c.execute("SELECT document_id,doc_type,state,payload FROM adv_inventory_control_docs WHERE user_id=? AND idempotency_key=?",
                           (user,body.idempotencyKey)).fetchone()
-            if old: return {"status":"duplicate","documentId":old["document_id"],"state":old["state"]}
+            request_payload = {
+                "orderId": order_id,
+                "warehouseId": body.warehouseId,
+                "lines": [
+                    {"productId": line.productId, "lotCode": line.lotCode,
+                     "quantity": format(amount(line.quantity), "f"), "unit": line.unit,
+                     "expiryDate": line.expiryDate, "receivedDate": line.receivedDate}
+                    for line in body.lines
+                ],
+            }
+            if old:
+                if old["doc_type"] != "PURCHASE_RECEIPT":
+                    raise HTTPException(409,"Idempotency key already belongs to a different inventory document")
+                prior_payload = json.loads(old["payload"])
+                prior_request = prior_payload.get("_request")
+                if prior_request is not None:
+                    same_request = prior_request == request_payload
+                else:
+                    # Backward-compatible validation for documents created before request snapshots existed.
+                    prior_receipts = prior_payload.get("receipts", [])
+                    prior_quantities = {}
+                    for item in prior_receipts:
+                        prior_quantities[item["productId"]] = prior_quantities.get(item["productId"], Decimal("0")) + Decimal(item["quantity"])
+                    requested_quantities = {}
+                    for item in request_payload["lines"]:
+                        requested_quantities[item["productId"]] = requested_quantities.get(item["productId"], Decimal("0")) + Decimal(item["quantity"])
+                    same_request = prior_payload.get("orderId") == order_id and prior_quantities == requested_quantities
+                if not same_request:
+                    raise HTTPException(409,"Idempotency key already belongs to a different purchase receipt request")
+                return {"status":"duplicate","documentId":old["document_id"],"state":old["state"]}
             order=c.execute("SELECT order_type,status,payload FROM business_orders WHERE user_id=? AND order_id=?",
                             (user,order_id)).fetchone()
             if not order: raise HTTPException(404,"Purchase order not found in this account")
@@ -756,7 +785,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                       (user,order_id))
             c.execute("INSERT INTO adv_inventory_control_docs VALUES(?,?,?,?,?,?,?,?)",
               (user,document_id,"PURCHASE_RECEIPT",body.idempotencyKey,"POSTED",
-               json.dumps({"orderId":order_id,"receipts":receipts},separators=(",",":")),now,now))
+               json.dumps({"orderId":order_id,"receipts":receipts,"_request":request_payload},separators=(",",":")),now,now))
         return {"status":"received_pending_inspection","orderId":order_id,"documentId":document_id,"receipts":receipts}
 
 
@@ -765,9 +794,24 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            duplicate=c.execute("SELECT movement_id FROM adv_stock_movements WHERE user_id=? AND idempotency_key=?",
-                                (user,body.idempotencyKey)).fetchone()
-            if duplicate: return {"status":"duplicate","movementId":duplicate["movement_id"]}
+            duplicate=c.execute("""SELECT m.movement_id,m.movement_type,m.reference_type,m.reference_id,
+                    m.source_warehouse_id,m.quantity,l.lot_id,l.lot_code,l.expiry_date
+                FROM adv_stock_movements m JOIN adv_lots l
+                  ON l.user_id=m.user_id AND l.lot_id=m.lot_id
+                WHERE m.user_id=? AND m.idempotency_key=?""",
+                (user,body.idempotencyKey)).fetchone()
+            if duplicate:
+                same_request = (
+                    duplicate["movement_type"] == "HARVEST_RECEIPT"
+                    and duplicate["reference_type"] == "HARVEST"
+                    and duplicate["reference_id"] == body.harvestId
+                    and duplicate["source_warehouse_id"] == body.warehouseId
+                    and duplicate["lot_code"] == body.lotCode
+                    and duplicate["expiry_date"] == body.expiryDate
+                )
+                if not same_request:
+                    raise HTTPException(409,"Idempotency key already belongs to a different harvest receipt request")
+                return {"status":"duplicate","lotId":duplicate["lot_id"],"movementId":duplicate["movement_id"]}
             if not c.execute("SELECT 1 FROM adv_warehouses WHERE user_id=? AND warehouse_id=? AND active=1",
                              (user,body.warehouseId)).fetchone():
                 raise HTTPException(404,"Warehouse not found in this account")
