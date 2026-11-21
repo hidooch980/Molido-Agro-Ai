@@ -656,3 +656,14 @@ def test_sales_order_fefo_idempotency_key_is_bound_to_order_action_and_warehouse
         f"/v2/erp/inventory/orders/{second_order.json()['id']}/fefo-reservations",
         headers=h,json={"idempotencyKey":key,"warehouseId":w})
     assert wrong_order.status_code == 409
+
+def test_inventory_lot_rejects_invalid_calendar_dates():
+    h = account("lot-invalid-date")
+    p = product(h, "CUC-INVALID-DATE")
+    w = warehouse(h, "INVALID-DATE")
+    response = client.post("/v2/erp/inventory/lots", headers=h, json={
+        "idempotencyKey":"invalid-lot-date-0001","warehouseId":w,"productId":p,
+        "lotCode":"INVALID-DATE-LOT","quantity":"1","unit":"kg",
+        "receivedDate":"2026-02-30","expiryDate":"2026-12-20"
+    })
+    assert response.status_code == 422
