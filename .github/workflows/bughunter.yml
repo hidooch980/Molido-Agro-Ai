@@ -1,0 +1,123 @@
+name: Molido BugHunter Auto Diagnostics
+on:
+  workflow_dispatch:
+    inputs:
+      apply_safe_fixes:
+        description: Allow Ruff fixes limited to server Python files
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: '23 2 * * *'
+  pull_request:
+    branches: [foundation/android-release-foundation]
+  push:
+    branches: [feature/bughunter-autofix-agent]
+permissions:
+  contents: read
+concurrency:
+  group: bughunter-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  diagnose:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref != 'feature/bughunter-autofix-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install backend test dependencies
+        run: python -m pip install -r server/requirements.txt
+      - name: Install optional safe fixer
+        run: python -m pip install ruff
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Run BugHunter
+        id: bughunter
+        continue-on-error: true
+        env:
+          APPLY_SAFE_FIXES: ${{ github.event_name == 'push' || github.event_name == 'schedule' || inputs.apply_safe_fixes == true }}
+        run: |
+          set -euo pipefail
+          args=(--report-dir artifacts/bughunter)
+          if [[ "$APPLY_SAFE_FIXES" == "true" ]]; then args+=(--apply-safe-fixes); fi
+          python scripts/bughunter_agent.py "${args[@]}"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: molido-bughunter-${{ github.run_number }}
+          path: artifacts/bughunter/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Mark failing diagnostics
+        if: steps.bughunter.outcome == 'failure'
+        run: exit 1
+  commit_safe_fixes:
+    needs: diagnose
+    if: needs.diagnose.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/feature/bughunter-autofix-agent'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bughunter-autofix-agent
+          persist-credentials: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: molido-bughunter-${{ github.run_number }}
+          path: artifacts/bughunter
+      - name: Apply and commit only verified safe fixes
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path, PurePosixPath
+          checked_out = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if checked_out != os.environ['GITHUB_SHA']:
+              raise SystemExit('Branch advanced after diagnostics; refusing to apply a stale patch.')
+          report = json.loads(Path('artifacts/bughunter/bughunter-report.json').read_text(encoding='utf-8'))
+          fixes = report.get('safe_fixes', {})
+          if report.get('overall') != 'passed' or fixes.get('status') != 'completed':
+              raise SystemExit(0)
+          files = fixes.get('changed_files', [])
+          for name in files:
+              path = PurePosixPath(name)
+              if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'server' or path.suffix != '.py':
+                  raise SystemExit('Refusing out-of-scope path: ' + name)
+          patch = Path('artifacts/bughunter/safe-fixes.patch')
+          if not files or not patch.is_file() or patch.stat().st_size == 0:
+              raise SystemExit(0)
+          PY
+          if [[ -s artifacts/bughunter/safe-fixes.patch ]]; then
+            git apply --check artifacts/bughunter/safe-fixes.patch
+            git apply --index artifacts/bughunter/safe-fixes.patch
+            python - <<'PY'
+          import subprocess
+          from pathlib import PurePosixPath
+          raw = subprocess.check_output(['git', 'diff', '--cached', '--name-only', '-z']).decode()
+          names = [name for name in raw.split('\0') if name]
+          for name in names:
+              path = PurePosixPath(name)
+              if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'server' or path.suffix != '.py':
+                  raise SystemExit('Refusing staged out-of-scope path: ' + name)
+          PY
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'chore(bughunter): apply tested safe Python fixes [skip ci]'
+            git push origin HEAD:feature/bughunter-autofix-agent
+          fi
+          fi

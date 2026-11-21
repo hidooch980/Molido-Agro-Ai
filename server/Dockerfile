@@ -3,7 +3,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 MOLIDO_DB_PATH=/data/molido.sql
 WORKDIR /srv/molido
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && useradd --system --uid 10001 molido && mkdir -p /data && chown -R molido:molido /data /srv/molido
-COPY app.py sensor_api.py business_api.py business_workflows.py business_settlements.py business_approval_ledger.py chirpstack_bridge.py backup_db.py restore_db.py ./
+COPY app.py sensor_api.py business_api.py business_workflows.py business_settlements.py business_approval_ledger.py advanced_inventory.py advanced_inventory_controls.py production_costing.py chirpstack_bridge.py backup_db.py restore_db.py ./
 USER molido
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"

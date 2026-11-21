@@ -58,6 +58,7 @@ class OrderTransitionInput(BaseModel):
 
 
 class HarvestInput(BaseModel):
+    idempotencyKey: str | None = Field(default=None, min_length=8, max_length=200)
     greenhouseId: str = Field(min_length=1, max_length=200)
     cropCycleId: str = Field(min_length=1, max_length=200)
     productId: str = Field(min_length=1, max_length=200)
@@ -131,6 +132,11 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
           crop_cycle_id TEXT NOT NULL, product_id TEXT NOT NULL, warehouse_id TEXT NOT NULL,
           quantity REAL NOT NULL, unit_price REAL NOT NULL, payload TEXT NOT NULL,
           created_at INTEGER NOT NULL, PRIMARY KEY(user_id,harvest_id)
+        );
+        CREATE TABLE IF NOT EXISTS greenhouse_harvest_keys (
+          user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, harvest_id TEXT NOT NULL,
+          created_at INTEGER NOT NULL, PRIMARY KEY(user_id,idempotency_key),
+          FOREIGN KEY(user_id,harvest_id) REFERENCES greenhouse_harvests(user_id,harvest_id)
         );
         CREATE TABLE IF NOT EXISTS business_transition_keys (
           user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, result TEXT NOT NULL,
@@ -250,21 +256,40 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
             init(c)
             c.execute("BEGIN IMMEDIATE")
             replay=c.execute("SELECT result FROM business_transition_keys WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
-            if replay: return json.loads(replay["result"])
+            if replay:
+                previous=json.loads(replay["result"])
+                if previous.get("id") != order_id or previous.get("action") != body.action:
+                    raise HTTPException(409,"Idempotency key already belongs to a different order transition")
+                return previous
             order=c.execute("SELECT order_type,party_id,status,total,payload FROM business_orders WHERE user_id=? AND order_id=?",(user,order_id)).fetchone()
             if not order: raise HTTPException(404,"Order not found")
             payload=decrypt_payload(order["payload"]); lines=payload["lines"]; state=order["status"]; action=body.action
             if action=="CONFIRM":
                 if state!="DRAFT": raise HTTPException(409,"Only draft orders can be confirmed")
                 if order["order_type"]=="SALES":
-                    for line in lines:
-                        warehouse="main"
-                        balance=c.execute("SELECT quantity FROM inventory_balances WHERE user_id=? AND warehouse_id=? AND product_id=?",(user,warehouse,line["productId"])).fetchone()
-                        available=float(balance["quantity"]) if balance else 0.0
-                        reserved=c.execute("SELECT COALESCE(SUM(quantity),0) q FROM order_reservations WHERE user_id=? AND warehouse_id=? AND product_id=? AND state='RESERVED'",(user,warehouse,line["productId"])).fetchone()["q"]
-                        if available-float(reserved)<float(line["quantity"]): raise HTTPException(409,"Insufficient available stock to reserve order")
-                    for line in lines:
-                        c.execute("INSERT INTO order_reservations VALUES(?,?,?,?,?,?,?)",(user,order_id,"main",line["productId"],line["quantity"],"RESERVED",now))
+                    advanced_table=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='adv_reservations'").fetchone()
+                    advanced_rows=[]
+                    if advanced_table:
+                        advanced_rows=c.execute("SELECT product_id,quantity FROM adv_reservations r JOIN adv_lots l ON l.user_id=r.user_id AND l.lot_id=r.lot_id WHERE r.user_id=? AND r.reference_type='SALES_ORDER' AND r.reference_id=? AND r.state='ACTIVE'",(user,order_id)).fetchall()
+                    if advanced_rows:
+                        from decimal import Decimal
+                        required_by_product={}
+                        for line in lines:
+                            product_id=line["productId"]
+                            required_by_product[product_id]=required_by_product.get(product_id,Decimal("0"))+Decimal(str(line["quantity"]))
+                        for product_id,required_qty in required_by_product.items():
+                            reserved_qty=sum((Decimal(r["quantity"]) for r in advanced_rows if r["product_id"]==product_id),Decimal("0"))
+                            if reserved_qty < required_qty:
+                                raise HTTPException(409,"Advanced lot reservations do not cover every sales order line")
+                    else:
+                        for line in lines:
+                            warehouse="main"
+                            balance=c.execute("SELECT quantity FROM inventory_balances WHERE user_id=? AND warehouse_id=? AND product_id=?",(user,warehouse,line["productId"])).fetchone()
+                            available=float(balance["quantity"]) if balance else 0.0
+                            reserved=c.execute("SELECT COALESCE(SUM(quantity),0) q FROM order_reservations WHERE user_id=? AND warehouse_id=? AND product_id=? AND state='RESERVED'",(user,warehouse,line["productId"])).fetchone()["q"]
+                            if available-float(reserved)<float(line["quantity"]): raise HTTPException(409,"Insufficient available stock to reserve order")
+                        for line in lines:
+                            c.execute("INSERT INTO order_reservations VALUES(?,?,?,?,?,?,?)",(user,order_id,"main",line["productId"],line["quantity"],"RESERVED",now))
                 state="CONFIRMED"
             elif action=="CANCEL":
                 if state not in ("DRAFT","CONFIRMED"): raise HTTPException(409,"Order cannot be cancelled in this state")
@@ -274,10 +299,15 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
                 state="SHIPPED"
             elif action=="DELIVER":
                 if order["order_type"]!="SALES" or state!="SHIPPED": raise HTTPException(409,"Sales order must be shipped before delivery")
-                for line in lines:
-                    c.execute("UPDATE inventory_balances SET quantity=quantity-?,updated_at=? WHERE user_id=? AND warehouse_id='main' AND product_id=? AND quantity>=?",(line["quantity"],now,user,line["productId"],line["quantity"]))
-                    if c.execute("SELECT changes()").fetchone()[0]!=1: raise HTTPException(409,"Stock changed; delivery rejected")
-                    c.execute("UPDATE order_reservations SET state='CONSUMED' WHERE user_id=? AND order_id=? AND product_id=? AND state='RESERVED'",(user,order_id,line["productId"]))
+                advanced_shipments=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='adv_stock_movements'").fetchone()
+                has_advanced_issue=False
+                if advanced_shipments:
+                    has_advanced_issue=c.execute("SELECT 1 FROM adv_stock_movements WHERE user_id=? AND reference_type='SALES_ORDER' AND reference_id=? AND movement_type='SHIPMENT_ISSUE' LIMIT 1",(user,order_id)).fetchone() is not None
+                if not has_advanced_issue:
+                    for line in lines:
+                        c.execute("UPDATE inventory_balances SET quantity=quantity-?,updated_at=? WHERE user_id=? AND warehouse_id='main' AND product_id=? AND quantity>=?",(line["quantity"],now,user,line["productId"],line["quantity"]))
+                        if c.execute("SELECT changes()").fetchone()[0]!=1: raise HTTPException(409,"Stock changed; delivery rejected")
+                        c.execute("UPDATE order_reservations SET state='CONSUMED' WHERE user_id=? AND order_id=? AND product_id=? AND state='RESERVED'",(user,order_id,line["productId"]))
                 state="DELIVERED"
                 _post_order_journal(c,user,order_id,order["total"],"SALES",now,encrypt_payload)
             elif action=="FULFILL":
@@ -360,16 +390,37 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
         user=uid(authorization); now=int(time.time()*1000); harvest_id=uuid.uuid4().hex
         with db() as c:
             init(c)
+            c.execute("BEGIN IMMEDIATE")
+            if body.idempotencyKey:
+                replay=c.execute("""SELECT h.harvest_id,h.payload FROM greenhouse_harvest_keys k
+                  JOIN greenhouse_harvests h ON h.user_id=k.user_id AND h.harvest_id=k.harvest_id
+                  WHERE k.user_id=? AND k.idempotency_key=?""",(user,body.idempotencyKey)).fetchone()
+                if replay:
+                    previous=decrypt_payload(replay["payload"])
+                    if previous != body.model_dump():
+                        raise HTTPException(409,"Idempotency key already belongs to a different harvest")
+                    return {"id":replay["harvest_id"],"status":"RECORDED","inventoryUpdated":True,
+                            "quantity":body.quantity,"unitPrice":body.unitPrice,"duplicate":True}
             # Verify greenhouse and crop-cycle records are owned by this account's synchronized records.
             for entity_type,entity_id in (("greenhouse",body.greenhouseId),("crop_cycle",body.cropCycleId)):
                 if not c.execute("SELECT 1 FROM records WHERE user_id=? AND entity_type=? AND entity_id=? AND deleted=0",(user,entity_type,entity_id)).fetchone():
                     raise HTTPException(404,f"{entity_type} not found in this account")
             if not c.execute("SELECT 1 FROM business_products WHERE user_id=? AND product_id=?",(user,body.productId)).fetchone():
                 raise HTTPException(404,"Product not found in this account")
-            c.execute("""INSERT INTO inventory_balances VALUES(?,?,?,?,?) ON CONFLICT(user_id,warehouse_id,product_id) DO UPDATE SET quantity=quantity+excluded.quantity,updated_at=excluded.updated_at""",(user,body.warehouseId,body.productId,body.quantity,now))
             payload=body.model_dump()
-            c.execute("INSERT INTO greenhouse_harvests VALUES(?,?,?,?,?,?,?,?,?,?)",(user,harvest_id,body.greenhouseId,body.cropCycleId,body.productId,body.warehouseId,body.quantity,body.unitPrice,encrypt_payload(payload),now))
-            c.execute("INSERT INTO inventory_movements(user_id,idempotency_key,warehouse_id,product_id,movement_type,quantity,payload,created_at) VALUES(?,?,?,?,?,?,?,?)",(user,f"harvest:{harvest_id}",body.warehouseId,body.productId,"RECEIPT",body.quantity,encrypt_payload({"source":"HARVEST","harvestId":harvest_id,**payload}),now))
+            c.execute("""INSERT INTO inventory_balances VALUES(?,?,?,?,?)
+              ON CONFLICT(user_id,warehouse_id,product_id) DO UPDATE
+              SET quantity=quantity+excluded.quantity,updated_at=excluded.updated_at""",
+              (user,body.warehouseId,body.productId,body.quantity,now))
+            c.execute("INSERT INTO greenhouse_harvests VALUES(?,?,?,?,?,?,?,?,?,?)",
+              (user,harvest_id,body.greenhouseId,body.cropCycleId,body.productId,body.warehouseId,
+               body.quantity,body.unitPrice,encrypt_payload(payload),now))
+            c.execute("INSERT INTO inventory_movements(user_id,idempotency_key,warehouse_id,product_id,movement_type,quantity,payload,created_at) VALUES(?,?,?,?,?,?,?,?)",
+              (user,f"harvest:{harvest_id}",body.warehouseId,body.productId,"RECEIPT",body.quantity,
+               encrypt_payload({"source":"HARVEST","harvestId":harvest_id,**payload}),now))
+            if body.idempotencyKey:
+                c.execute("INSERT INTO greenhouse_harvest_keys VALUES(?,?,?,?)",
+                  (user,body.idempotencyKey,harvest_id,now))
         return {"id":harvest_id,"status":"RECORDED","inventoryUpdated":True,"quantity":body.quantity,"unitPrice":body.unitPrice}
 
     @app.get("/v1/erp/harvest")

@@ -107,19 +107,7 @@ private fun AgroApp() {
                 Tab.STOCK -> StockPage(stock, onSave = { n, cat, q, u, min ->
                     scope.launch { try { val id = UUID.randomUUID().toString(); val item = InventoryItemEntity(id, n.trim(), cat, q, u, min); val payload = JSONObject().put("id", id).put("name", item.name).put("category", cat).put("quantity", q).put("unit", u).put("minimumQuantity", min).put("updatedAtEpochMillis", item.updatedAtEpochMillis).toString(); db.insertAndEnqueue(context, "inventory_item", id, payload) { db.inventoryDao().insert(item) }; notice = "قلم انبار ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "نام قلم انبار باید یکتا باشد." } }
                 }, onUpdate = { item -> scope.launch { try { val payload = JSONObject().put("id", item.id).put("name", item.name).put("category", item.category).put("quantity", item.quantity).put("unit", item.unit).put("minimumQuantity", item.minimumQuantity).put("updatedAtEpochMillis", item.updatedAtEpochMillis).toString(); db.updateAndEnqueue(context, "inventory_item", item.id, payload) { db.inventoryDao().upsert(item) }; notice = "قلم انبار ویرایش شد." } catch (_: Exception) { notice = "ویرایش قلم انبار ناموفق بود." } } }, onDelete = { id -> scope.launch { db.deleteAndEnqueue(context, "inventory_item", id) { db.inventoryDao().deleteById(id) }; notice = "قلم انبار حذف شد." } })
-                Tab.BUSINESS -> BusinessPage(businessRecords) { type, title, description, amount ->
-                    scope.launch { try {
-                        val id = UUID.randomUUID().toString()
-                        val now = System.currentTimeMillis()
-                        val payload = JSONObject().put("id", id).put("recordType", type).put("title", title)
-                            .put("description", description).put("amount", amount).put("status", "LOCAL_DRAFT")
-                            .put("createdAtEpochMillis", now).toString()
-                        val item = BusinessRecordEntity(id, type, title, "LOCAL_DRAFT", payload, now)
-                        db.insertAndEnqueue(context, type, id, payload) { db.businessRecordDao().insert(item) }
-                        notice = "رکورد ذخیره شد و در صف همگام‌سازی قرار گرفت."
-                    } catch (_: Exception) { notice = "ذخیره رکورد ناموفق بود؛ اطلاعات را بررسی کنید." } }
-                }
-                Tab.BUSINESS -> CrmErpPage(currentUser) { notice = it }
+Tab.BUSINESS -> CrmErpPage(currentUser) { notice = it }
                 Tab.MONEY -> FinancePage(finance, balance, onSave = { type, cat, amount, desc ->
                     scope.launch { try { val id = UUID.randomUUID().toString(); val item = FinancialEntryEntity(id, null, type, cat, amount, description = desc); val payload = JSONObject().put("id", id).put("type", type).put("category", cat).put("amount", amount).put("currency", item.currency).put("occurredAtEpochMillis", item.occurredAtEpochMillis).put("description", desc).toString(); db.insertAndEnqueue(context, "financial_entry", id, payload) { db.financeDao().insert(item) }; notice = "سند مالی ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت سند مالی ناموفق بود." } }
                 }, onUpdate = { item -> scope.launch { try { val payload = JSONObject().put("id", item.id).put("greenhouseId", item.greenhouseId).put("type", item.type).put("category", item.category).put("amount", item.amount).put("currency", item.currency).put("occurredAtEpochMillis", item.occurredAtEpochMillis).put("description", item.description).toString(); db.updateAndEnqueue(context, "financial_entry", item.id, payload) { db.financeDao().upsert(item) }; notice = "سند مالی ویرایش شد." } catch (_: Exception) { notice = "ویرایش سند مالی ناموفق بود." } } }, onDelete = { id -> scope.launch { db.deleteAndEnqueue(context, "financial_entry", id) { db.financeDao().deleteById(id) }; notice = "سند مالی حذف شد." } })

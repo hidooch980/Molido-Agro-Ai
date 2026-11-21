@@ -160,3 +160,15 @@ register_settlement_routes(app, db, current_user, encrypt_payload)
 
 from business_approval_ledger import register_approval_ledger_routes
 register_approval_ledger_routes(app, db, current_user, encrypt_payload, decrypt_payload)
+
+
+from advanced_inventory import register_advanced_inventory_routes
+register_advanced_inventory_routes(app, db, current_user)
+
+
+from production_costing import register_production_costing_routes
+register_production_costing_routes(app, db, current_user, decrypt_payload)
+
+
+from advanced_inventory_controls import register_advanced_inventory_control_routes
+register_advanced_inventory_control_routes(app, db, current_user, decrypt_payload, encrypt_payload)

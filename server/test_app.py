@@ -1,4 +1,5 @@
-import os, tempfile
+from pathlib import Path
+import os
 os.environ["MOLIDO_JWT_SECRET"]="test-secret-that-is-long-enough-for-hmac-sha256"
 os.environ["MOLIDO_DATA_KEY"]="eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg"
 from fastapi.testclient import TestClient
@@ -222,10 +223,10 @@ def test_encrypted_sqlite_backup_and_restore_round_trip(tmp_path, monkeypatch):
         connection.execute("INSERT INTO sample(value) VALUES('backup-ok')")
     backup = tmp_path / "backup.sqlite3.enc"
     env = dict(os.environ, MOLIDO_DB_PATH=str(original))
-    subprocess.run([sys.executable, "backup_db.py", str(backup)], check=True, env=env, capture_output=True, text=True)
+    subprocess.run([sys.executable, str(Path(__file__).with_name("backup_db.py")), str(backup)], check=True, env=env, capture_output=True, text=True)
     restored = tmp_path / "restored.sqlite3"
     env["MOLIDO_DB_PATH"] = str(restored)
-    subprocess.run([sys.executable, "restore_db.py", str(backup)], check=True, env=env, capture_output=True, text=True)
+    subprocess.run([sys.executable, str(Path(__file__).with_name("restore_db.py")), str(backup)], check=True, env=env, capture_output=True, text=True)
     with sqlite3.connect(restored) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute("SELECT value FROM sample").fetchone()[0] == "backup-ok"
