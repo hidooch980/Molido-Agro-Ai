@@ -628,3 +628,31 @@ def test_cycle_count_idempotency_key_rejects_changed_count_lines():
     changed = client.post("/v2/erp/inventory/cycle-counts", headers=h,
                           json={**body,"lines":[{"lotId":received["lotId"],"countedQuantity":"8"}]})
     assert changed.status_code == 409
+
+def test_sales_order_fefo_idempotency_key_is_bound_to_order_action_and_warehouse():
+    h = account("sales-fefo-key-binding")
+    customer = client.post("/v1/crm/customers", headers=h, json={"name":"FEFO Key Customer"})
+    p = product(h, "CUC-FEFO-KEY-BIND")
+    w = warehouse(h, "FEFO-KEY-BIND")
+    other_w = warehouse(h, "FEFO-KEY-OTHER")
+    first_order = client.post("/v1/erp/sales/orders", headers=h, json={
+        "partyId":customer.json()["id"],"lines":[{"productId":p,"quantity":2,"unitPrice":100}]
+    })
+    second_order = client.post("/v1/erp/sales/orders", headers=h, json={
+        "partyId":customer.json()["id"],"lines":[{"productId":p,"quantity":2,"unitPrice":100}]
+    })
+    assert first_order.status_code == 200 and second_order.status_code == 200
+    received = lot(h, p, w, key="fefo-key-stock-01", code="FEFO-KEY-STOCK", quantity="4")
+    release(h, received["lotId"])
+    key = "sales-fefo-key-binding-01"
+    endpoint = f"/v2/erp/inventory/orders/{first_order.json()['id']}/fefo-reservations"
+    first = client.post(endpoint, headers=h, json={"idempotencyKey":key,"warehouseId":w})
+    assert first.status_code == 200, first.text
+    same = client.post(endpoint, headers=h, json={"idempotencyKey":key,"warehouseId":w})
+    assert same.status_code == 200 and same.json()["status"] == "duplicate"
+    wrong_warehouse = client.post(endpoint, headers=h, json={"idempotencyKey":key,"warehouseId":other_w})
+    assert wrong_warehouse.status_code == 409
+    wrong_order = client.post(
+        f"/v2/erp/inventory/orders/{second_order.json()['id']}/fefo-reservations",
+        headers=h,json={"idempotencyKey":key,"warehouseId":w})
+    assert wrong_order.status_code == 409
