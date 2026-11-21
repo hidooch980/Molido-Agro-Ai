@@ -299,13 +299,43 @@ def test_customer_and_supplier_returns_require_approval_and_keep_ledger_history(
     w = warehouse(h, "RETURNS")
     received = lot(h, p, w, "return-base-lot-01", "RETURN-BASE", "20")
     release(h, received["lotId"])
+    customer_account = client.post("/v1/crm/customers",headers=h,json={"name":"Return Customer"})
+    sales_order = client.post("/v1/erp/sales/orders",headers=h,json={
+        "partyId":customer_account.json()["id"],
+        "lines":[{"productId":p,"quantity":10,"unitPrice":100}]
+    })
+    assert sales_order.status_code == 200, sales_order.text
+    reserved_order = client.post(
+        f"/v2/erp/inventory/orders/{sales_order.json()['id']}/fefo-reservations",
+        headers=h,json={"idempotencyKey":"return-order-reserve-01","warehouseId":w})
+    assert reserved_order.status_code == 200, reserved_order.text
+    confirmed_order = client.post(
+        f"/v1/erp/orders/{sales_order.json()['id']}/transition",headers=h,
+        json={"action":"CONFIRM","idempotencyKey":"return-order-confirm-01"})
+    assert confirmed_order.status_code == 200, confirmed_order.text
+    shipped_order = client.post(
+        f"/v2/erp/inventory/orders/{sales_order.json()['id']}/fulfill",headers=h,
+        json={"idempotencyKey":"return-order-ship-01"})
+    assert shipped_order.status_code == 200, shipped_order.text
     customer = client.post("/v2/erp/inventory/returns", headers=h, json={
         "idempotencyKey":"customer-return-001","direction":"CUSTOMER_RETURN",
         "lotId":received["lotId"],"warehouseId":w,"quantity":"3",
-        "referenceId":"SO-RETURN-1","reason":"Customer returned damaged packaging",
+        "referenceId":sales_order.json()["id"],"reason":"Customer returned damaged packaging",
         "accountingAmount":"300","currency":"IRR"
     })
     assert customer.status_code == 200 and customer.json()["status"] == "pending_approval"
+    fake_reference = client.post("/v2/erp/inventory/returns",headers=h,json={
+        "idempotencyKey":"customer-return-fake-001","direction":"CUSTOMER_RETURN",
+        "lotId":received["lotId"],"warehouseId":w,"quantity":"1",
+        "referenceId":"SO-NOT-SHIPPED","reason":"Unverified customer return"
+    })
+    assert fake_reference.status_code == 409
+    over_return = client.post("/v2/erp/inventory/returns",headers=h,json={
+        "idempotencyKey":"customer-return-over-001","direction":"CUSTOMER_RETURN",
+        "lotId":received["lotId"],"warehouseId":w,"quantity":"8",
+        "referenceId":sales_order.json()["id"],"reason":"Excess customer return"
+    })
+    assert over_return.status_code == 409
     approval_headers = {**h, "X-Approval-Token":os.environ["MOLIDO_INVENTORY_APPROVAL_TOKEN"]}
     approved_customer = client.post(
         f"/v2/erp/inventory/returns/{customer.json()['documentId']}/approve",
@@ -341,7 +371,7 @@ def test_customer_and_supplier_returns_require_approval_and_keep_ledger_history(
     assert supplier_journal.status_code == 200 and supplier_journal.json()["status"] == "POSTED"
     trace = client.get(f"/v2/erp/inventory/lots/{received['lotId']}/trace", headers=h).json()
     assert [x["type"] for x in trace["movements"]][-1] == "SUPPLIER_RETURN"
-    assert trace["balances"][0]["quantity"] == "16"
+    assert trace["balances"][0]["quantity"] == "6"
 
 
 def test_scrap_and_cycle_count_are_approval_gated_and_idempotent():
