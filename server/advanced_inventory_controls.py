@@ -710,7 +710,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            old=c.execute("SELECT document_id,doc_type,state,payload FROM adv_inventory_control_docs WHERE user_id=? AND idempotency_key=?",
+            old=c.execute("SELECT document_id,document_type,state,payload FROM adv_inventory_control_docs WHERE user_id=? AND idempotency_key=?",
                           (user,body.idempotencyKey)).fetchone()
             request_payload = {
                 "orderId": order_id,
@@ -723,7 +723,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                 ],
             }
             if old:
-                if old["doc_type"] != "PURCHASE_RECEIPT":
+                if old["document_type"] != "PURCHASE_RECEIPT":
                     raise HTTPException(409,"Idempotency key already belongs to a different inventory document")
                 prior_payload = json.loads(old["payload"])
                 prior_request = prior_payload.get("_request")
