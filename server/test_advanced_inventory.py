@@ -192,3 +192,27 @@ def test_reservation_release_restores_available_quantity_without_moving_stock():
         "referenceType": "SALES_ORDER", "referenceId": "SO-RES-3", "quantity": "9"
     })
     assert reserve_again.status_code == 200, reserve_again.text
+
+
+def test_lot_trace_returns_full_history_and_is_account_scoped():
+    owner = account("lottraceowner")
+    other = account("lottraceother")
+    p = product(owner, "CUC-TRACE-01")
+    w = warehouse(owner, "TRACE-MAIN")
+    received = lot(owner, p, w, "trace-receipt-001", "LOT-TRACE-001", "18")
+    lot_id = received["lotId"]
+    release(owner, lot_id)
+    reserved = client.post("/v2/erp/inventory/reservations", headers=owner, json={
+        "idempotencyKey": "trace-reserve-001", "lotId": lot_id, "warehouseId": w,
+        "referenceType": "SALES_ORDER", "referenceId": "SO-TRACE-1", "quantity": "4"
+    })
+    assert reserved.status_code == 200, reserved.text
+    trace = client.get(f"/v2/erp/inventory/lots/{lot_id}/trace", headers=owner)
+    assert trace.status_code == 200, trace.text
+    data = trace.json()
+    assert data["lot"]["lotCode"] == "LOT-TRACE-001"
+    assert [x["type"] for x in data["movements"]] == ["RECEIPT"]
+    assert data["reservations"][0]["referenceId"] == "SO-TRACE-1"
+    assert data["qualityHistory"][0]["to"] == "RELEASED"
+    assert data["balances"][0]["quantity"] == "18"
+    assert client.get(f"/v2/erp/inventory/lots/{lot_id}/trace", headers=other).status_code == 404
