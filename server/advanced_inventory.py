@@ -263,8 +263,18 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
         user=actor(authorization); now=int(time.time()*1000); amount=qty(body.quantity)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            old=c.execute("SELECT reservation_id FROM adv_reservations WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
-            if old: return {"status":"duplicate","reservationId":old["reservation_id"]}
+            old=c.execute("SELECT * FROM adv_reservations WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
+            if old:
+                same_request = (
+                    old["lot_id"] == body.lotId
+                    and old["warehouse_id"] == body.warehouseId
+                    and old["reference_type"] == body.referenceType
+                    and old["reference_id"] == body.referenceId
+                    and Decimal(old["quantity"]) == amount
+                )
+                if not same_request:
+                    raise HTTPException(409,"Idempotency key already belongs to a different reservation request")
+                return {"status":"duplicate","reservationId":old["reservation_id"]}
             ensure_warehouse(c,user,body.warehouseId)
             lot=c.execute("SELECT product_id,quality_state,expiry_date FROM adv_lots WHERE user_id=? AND lot_id=?",(user,body.lotId)).fetchone()
             if not lot: raise HTTPException(404,"Lot not found in this account")
@@ -297,8 +307,11 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            previous=c.execute("SELECT result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
-            if previous: return json.loads(previous["result"])
+            previous=c.execute("SELECT reservation_id,action,result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
+            if previous:
+                if previous["reservation_id"] != reservation_id or previous["action"] != body.action:
+                    raise HTTPException(409,"Idempotency key already belongs to a different reservation action")
+                return json.loads(previous["result"])
             reservation=c.execute("SELECT * FROM adv_reservations WHERE user_id=? AND reservation_id=?",(user,reservation_id)).fetchone()
             if not reservation: raise HTTPException(404,"Reservation not found in this account")
             if reservation["state"] != "ACTIVE": raise HTTPException(409,"Only active reservations can be changed")
