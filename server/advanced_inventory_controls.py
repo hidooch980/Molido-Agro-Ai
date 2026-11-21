@@ -227,6 +227,11 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
             raise HTTPException(404, "Inventory document not found in this account")
         return row
 
+    def verify_control_replay(old, expected, label):
+        stored = json.loads(old["payload"])
+        if any(stored.get(key) != value for key, value in expected.items()):
+            raise HTTPException(409, f"Idempotency key already belongs to a different {label} request")
+
     @app.post("/v2/erp/inventory/fefo/reservations")
     def reserve_fefo(body: FefoReserveInput, authorization: str | None = Header(default=None)):
         user = actor(authorization)
@@ -295,6 +300,13 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
             old = c.execute("SELECT document_id,state,payload FROM adv_inventory_control_docs WHERE user_id=? AND idempotency_key=?",
                             (user, body.idempotencyKey)).fetchone()
             if old:
+                verify_control_replay(old, {
+                    "direction": body.direction, "lotId": body.lotId, "warehouseId": body.warehouseId,
+                    "quantity": format(requested, "f"), "referenceId": body.referenceId,
+                    "reason": body.reason,
+                    "accountingAmount": format(body.accountingAmount, "f") if body.accountingAmount is not None else None,
+                    "currency": body.currency,
+                }, "return")
                 return {"status":"duplicate","documentId":old["document_id"],"state":old["state"]}
             lot = c.execute("""SELECT product_id,lot_code,unit,expiry_date,quality_state
               FROM adv_lots WHERE user_id=? AND lot_id=?""",(user,body.lotId)).fetchone()
@@ -395,9 +407,16 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         q=amount(body.quantity)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            old=c.execute("SELECT document_id,state FROM adv_inventory_control_docs WHERE user_id=? AND idempotency_key=?",
+            old=c.execute("SELECT document_id,state,payload FROM adv_inventory_control_docs WHERE user_id=? AND idempotency_key=?",
                           (user,body.idempotencyKey)).fetchone()
             if old:
+                verify_control_replay(old, {
+                    "lotId": body.lotId, "warehouseId": body.warehouseId, "quantity": format(q, "f"),
+                    "reasonCode": body.reasonCode, "reason": body.reason, "sourceReference": body.sourceReference,
+                    "greenhouseId": body.greenhouseId, "cropCycleId": body.cropCycleId,
+                    "unitCost": format(body.unitCost, "f") if body.unitCost is not None else None,
+                    "currency": body.currency,
+                }, "scrap")
                 return {"status":"duplicate","documentId":old["document_id"],"state":old["state"]}
             lot=c.execute("SELECT product_id,unit FROM adv_lots WHERE user_id=? AND lot_id=?",(user,body.lotId)).fetchone()
             if not lot: raise HTTPException(404,"Lot not found in this account")
@@ -472,9 +491,19 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
             raise HTTPException(422,"A lot may appear only once in a count")
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            old=c.execute("SELECT document_id,state FROM adv_inventory_control_docs WHERE user_id=? AND idempotency_key=?",
+            old=c.execute("SELECT document_id,state,payload FROM adv_inventory_control_docs WHERE user_id=? AND idempotency_key=?",
                           (user,body.idempotencyKey)).fetchone()
-            if old: return {"status":"duplicate","documentId":old["document_id"],"state":old["state"]}
+            if old:
+                verify_control_replay(old, {"warehouseId": body.warehouseId, "reason": body.reason}, "cycle-count")
+                stored_lines = c.execute(
+                    "SELECT lot_id,counted_quantity FROM adv_cycle_count_lines WHERE user_id=? AND document_id=?",
+                    (user, old["document_id"]),
+                ).fetchall()
+                stored_counts = {row["lot_id"]: Decimal(row["counted_quantity"]) for row in stored_lines}
+                requested_counts = {line.lotId: amount(line.countedQuantity, allow_zero=True) for line in body.lines}
+                if stored_counts != requested_counts:
+                    raise HTTPException(409, "Idempotency key already belongs to a different cycle-count request")
+                return {"status":"duplicate","documentId":old["document_id"],"state":old["state"]}
             if not c.execute("SELECT 1 FROM adv_warehouses WHERE user_id=? AND warehouse_id=? AND active=1",
                              (user,body.warehouseId)).fetchone():
                 raise HTTPException(404,"Warehouse not found in this account")
@@ -552,13 +581,20 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            replay=c.execute("SELECT result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
+            replay=c.execute("SELECT reservation_id,action,result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
                              (user,body.idempotencyKey)).fetchone()
-            if replay: return json.loads(replay["result"])
+            if replay:
+                if replay["reservation_id"] != order_id or replay["action"] != "ORDER_FEFO_RESERVE":
+                    raise HTTPException(409, "Idempotency key already belongs to a different order action")
+                previous_result = json.loads(replay["result"])
+                if previous_result.get("warehouseId") != body.warehouseId:
+                    raise HTTPException(409, "Idempotency key already belongs to a different warehouse")
+                previous_result["status"] = "duplicate"
+                return previous_result
             order=c.execute("SELECT order_type,status,payload FROM business_orders WHERE user_id=? AND order_id=?",
                             (user,order_id)).fetchone()
             if not order: raise HTTPException(404,"Sales order not found in this account")
-            if order["order_type"]!="SALES" or order["status"] not in ("DRAFT","CONFIRMED"):
+            if order["order_type"]!="SALES" or order["status"]!="CONFIRMED":
                 raise HTTPException(409,"Only confirmed sales orders can reserve FEFO stock")
             if not c.execute("SELECT 1 FROM adv_warehouses WHERE user_id=? AND warehouse_id=? AND active=1",
                              (user,body.warehouseId)).fetchone():
@@ -593,7 +629,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                     allocations.append({"line":index,"reservationId":reservation_id,"lotId":row["lot_id"],
                                         "quantity":format(take,"f"),"expiryDate":row["expiry_date"]})
                     remaining-=take
-            result={"status":"reserved","orderId":order_id,"allocationPolicy":"FEFO","allocations":allocations}
+            result={"status":"reserved","orderId":order_id,"warehouseId":body.warehouseId,"allocationPolicy":"FEFO","allocations":allocations}
             c.execute("INSERT INTO adv_reservation_actions VALUES(?,?,?,?,?,?)",
                       (user,body.idempotencyKey,order_id,"ORDER_FEFO_RESERVE",json.dumps(result),now))
         return result
@@ -604,9 +640,14 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            replay=c.execute("SELECT result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
+            replay=c.execute("SELECT reservation_id,action,result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
                              (user,body.idempotencyKey)).fetchone()
-            if replay: return json.loads(replay["result"])
+            if replay:
+                if replay["reservation_id"] != order_id or replay["action"] != "ORDER_FULFILL":
+                    raise HTTPException(409, "Idempotency key already belongs to a different order action")
+                previous_result = json.loads(replay["result"])
+                previous_result["status"] = "duplicate"
+                return previous_result
             order=c.execute("SELECT order_type,status FROM business_orders WHERE user_id=? AND order_id=?",
                             (user,order_id)).fetchone()
             if not order: raise HTTPException(404,"Sales order not found in this account")
