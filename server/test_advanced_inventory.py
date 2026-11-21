@@ -310,3 +310,62 @@ def test_scrap_and_cycle_count_are_approval_gated_and_idempotent():
     balance_row = next(x for x in client.get("/v2/erp/inventory/balances",headers=h).json()["items"]
                        if x["lotId"] == received["lotId"])
     assert balance_row["quantity"] == "17"
+
+
+
+def test_sales_order_fefo_fulfillment_posts_lot_movements_against_order():
+    h = account("salesorderfefo")
+    customer = client.post("/v1/crm/customers", headers=h, json={"name":"FEFO Customer"})
+    p = product(h, "CUC-SALES-FEFO")
+    w = warehouse(h, "SALES-FEFO")
+    # Legacy balance is only used by the existing order-confirmation gate.
+    legacy = client.post("/v1/erp/inventory/movements", headers=h, json={
+        "idempotencyKey":"legacy-sales-stock-001","productId":p,"warehouseId":"main",
+        "movementType":"RECEIPT","quantity":5
+    })
+    assert legacy.status_code == 200, legacy.text
+    order = client.post("/v1/erp/sales/orders", headers=h, json={
+        "partyId":customer.json()["id"],"lines":[{"productId":p,"quantity":5,"unitPrice":100}]
+    })
+    assert order.status_code == 200, order.text
+    confirmed = client.post(f"/v1/erp/orders/{order.json()['id']}/transition", headers=h,
+                            json={"action":"CONFIRM","idempotencyKey":"confirm-sales-fefo-001"})
+    assert confirmed.status_code == 200 and confirmed.json()["status"] == "CONFIRMED"
+    received = lot(h,p,w,"sales-fefo-lot-001","SALES-FEFO-LOT","5")
+    release(h,received["lotId"])
+    reserved = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/fefo-reservations",
+                           headers=h,json={"idempotencyKey":"order-fefo-reserve-001","warehouseId":w})
+    assert reserved.status_code == 200, reserved.text
+    shipped = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/fulfill",
+                          headers=h,json={"idempotencyKey":"order-fefo-ship-001"})
+    assert shipped.status_code == 200, shipped.text
+    assert shipped.json()["status"] == "shipped"
+    trace = client.get(f"/v2/erp/inventory/lots/{received['lotId']}/trace",headers=h).json()
+    assert trace["movements"][-1]["type"] == "SHIPMENT_ISSUE"
+    assert trace["movements"][-1]["referenceId"] == order.json()["id"]
+    order_state = next(x for x in client.get("/v1/erp/orders",headers=h).json()["items"]
+                       if x["id"] == order.json()["id"])
+    assert order_state["status"] == "SHIPPED"
+
+
+def test_purchase_order_receipt_creates_inspection_lots_and_links_supplier_order():
+    h = account("purchaseorderlot")
+    supplier = client.post("/v1/erp/suppliers",headers=h,json={"name":"FEFO Supplier"})
+    p = product(h,"CUC-PURCHASE-LOT")
+    w = warehouse(h,"PURCHASE-LOT")
+    order = client.post("/v1/erp/purchase/orders",headers=h,json={
+        "partyId":supplier.json()["id"],"lines":[{"productId":p,"quantity":12,"unitPrice":50}]
+    })
+    assert order.status_code == 200, order.text
+    confirmed = client.post(f"/v1/erp/orders/{order.json()['id']}/transition",headers=h,
+                            json={"action":"CONFIRM","idempotencyKey":"confirm-purchase-lot-001"})
+    assert confirmed.status_code == 200 and confirmed.json()["status"] == "CONFIRMED"
+    receipt = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/purchase-receipts",
+                          headers=h,json={"idempotencyKey":"purchase-receipt-001","warehouseId":w,
+                          "lines":[{"productId":p,"lotCode":"PO-LOT-001","quantity":"12",
+                                    "unit":"kg","receivedDate":"2026-11-21","expiryDate":"2027-01-01"}]})
+    assert receipt.status_code == 200, receipt.text
+    assert receipt.json()["receipts"][0]["qualityState"] == "PENDING_INSPECTION"
+    order_state = next(x for x in client.get("/v1/erp/orders",headers=h).json()["items"]
+                       if x["id"] == order.json()["id"])
+    assert order_state["status"] == "RECEIVED"
