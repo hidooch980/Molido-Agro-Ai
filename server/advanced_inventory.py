@@ -337,7 +337,9 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
         return {"status":"reserved","reservationId":ident,"availableAfter":format(on_hand-reserved-amount,"f")}
 
     @app.post("/v2/erp/inventory/lots/{lot_id}/quality")
-    def change_quality(lot_id: str, body: QualityInput, authorization: str | None = Header(default=None)):
+    def change_quality(lot_id: str, body: QualityInput,
+                       x_approval_token: str | None = Header(default=None),
+                       authorization: str | None = Header(default=None)):
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
@@ -347,13 +349,7 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
             if old in ("REJECTED","EXPIRED") and body.state=="RELEASED":
                 raise HTTPException(409,"Rejected or expired lot cannot be released")
             expected=os.environ.get("MOLIDO_INVENTORY_APPROVAL_TOKEN","")
-            if len(expected)<32 or not authorization:
-                raise HTTPException(403,"Quality status changes require human approval")
-            # The approval token is supplied separately from the account bearer token.
-            # Never accept the account token as a substitute for the QC approval secret.
-            approval_token = os.environ.get("MOLIDO_INVENTORY_APPROVAL_TOKEN","")
-            supplied = os.environ.get("MOLIDO_INVENTORY_APPROVAL_TOKEN","")
-            if len(approval_token)<32 or not hmac.compare_digest(approval_token, supplied):
+            if len(expected)<32 or not x_approval_token or not hmac.compare_digest(expected,x_approval_token):
                 raise HTTPException(403,"Quality approval is not configured or token is invalid")
             c.execute("UPDATE adv_lots SET quality_state=? WHERE user_id=? AND lot_id=?",(body.state,user,lot_id))
             c.execute("INSERT INTO adv_quality_events VALUES(?,?,?,?,?,?,?,?,?)",
