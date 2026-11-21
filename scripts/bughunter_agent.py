@@ -72,6 +72,13 @@ def main() -> int:
   fixes['rollback_files'] = rollback_safe_fixes(_SAFE_FIX_SNAPSHOT, fixes['changed_files'])
   fixes['status'] = 'rolled_back' if fixes['rollback_files'] else 'needs_review'
   fixes['changed_files'] = []
+ if fixes.get('status') == 'completed' and fixes.get('changed_files') and passed == len(checks):
+  patch = subprocess.run(['git', 'diff', '--binary', '--', *fixes['changed_files']], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+  if patch.returncode == 0 and patch.stdout:
+   (outdir/'safe-fixes.patch').write_bytes(patch.stdout)
+  else:
+   fixes['status'] = 'patch_export_failed'
+   fixes['changed_files'] = []
  report={'agent':'Molido BugHunter & AutoFix','schema_version':1,'generated_at':datetime.now(timezone.utc).isoformat(),'safe_fixes':fixes,'checks':[asdict(c) for c in checks],'totals':{'checks':len(checks),'passed':passed,'failed_or_timed_out':failed,'not_run':sum(c.status=='not_run' for c in checks)},'overall':'passed' if passed==len(checks) and failed==0 else 'needs_attention','safety':{'database_or_user_data_mutation':False,'secret_or_signing_access':False,'merge_or_release_permission':False,'non_deterministic_fixes_require_human_review':True}}
  (outdir/'bughunter-report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
  lines=['# Molido BugHunter report','',f"Generated: {report['generated_at']}",f"Overall: {report['overall']}",f"Checks: {len(checks)}; passed: {passed}; failed or timed out: {failed}",'']
