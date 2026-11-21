@@ -27,7 +27,7 @@ class CostEntryInput(BaseModel):
     currency: str = Field(default="IRR", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
     quantity: Decimal | None = Field(default=None, gt=0, max_digits=24, decimal_places=6)
     unit: str | None = Field(default=None, max_length=24)
-    allocationMethod: Literal["DIRECT", "OUTPUT_QUANTITY"] = "OUTPUT_QUANTITY"
+    allocationMethod: Literal["OUTPUT_QUANTITY"] = "OUTPUT_QUANTITY"
     sourceReference: str = Field(min_length=2, max_length=200)
     notes: str = Field(default="", max_length=2000)
 
