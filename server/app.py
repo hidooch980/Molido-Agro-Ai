@@ -171,4 +171,4 @@ register_production_costing_routes(app, db, current_user, decrypt_payload)
 
 
 from advanced_inventory_controls import register_advanced_inventory_control_routes
-register_advanced_inventory_control_routes(app, db, current_user)
+register_advanced_inventory_control_routes(app, db, current_user, decrypt_payload)
