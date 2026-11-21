@@ -43,7 +43,14 @@ def rollback_safe_fixes(snapshot: dict[str, bytes], changed_files: list[str]) ->
    continue
   original = snapshot.get(path.as_posix())
   target = ROOT / path
-  if original is not None and (not target.is_file() or target.read_bytes() != original):
+  if original is None:
+   # A test or fixer created a new Python file inside the guarded server tree.
+   # Remove only that new file; never follow paths outside server/*.py.
+   if target.is_file():
+    target.unlink()
+    restored.append(path.as_posix())
+   continue
+  if not target.is_file() or target.read_bytes() != original:
    target.parent.mkdir(parents=True, exist_ok=True)
    target.write_bytes(original)
    restored.append(path.as_posix())
@@ -83,7 +90,7 @@ def main() -> int:
   for name in rollback_targets:
    original = _SAFE_FIX_SNAPSHOT.get(name)
    target = ROOT / name
-   if original is not None and (not target.is_file() or target.read_bytes() != original):
+   if (original is None and target.exists()) or (original is not None and (not target.is_file() or target.read_bytes() != original)):
     unresolved.append(name)
   fixes['rollback_unresolved_files'] = unresolved
   fixes['status'] = 'rolled_back' if not unresolved else 'needs_review'
