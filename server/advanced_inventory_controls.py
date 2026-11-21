@@ -419,7 +419,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
             order=c.execute("SELECT order_type,status,payload FROM business_orders WHERE user_id=? AND order_id=?",
                             (user,order_id)).fetchone()
             if not order: raise HTTPException(404,"Sales order not found in this account")
-            if order["order_type"]!="SALES" or order["status"]!="CONFIRMED":
+            if order["order_type"]!="SALES" or order["status"] not in ("DRAFT","CONFIRMED"):
                 raise HTTPException(409,"Only confirmed sales orders can reserve FEFO stock")
             if not c.execute("SELECT 1 FROM adv_warehouses WHERE user_id=? AND warehouse_id=? AND active=1",
                              (user,body.warehouseId)).fetchone():
