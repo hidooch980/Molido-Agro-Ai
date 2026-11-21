@@ -60,6 +60,16 @@ def release(headers, lot_id):
     assert response.status_code == 200, response.text
 
 
+def test_fefo_reservation_route_is_registered_exactly_once():
+    matching = [
+        route for route in app_module.app.routes
+        if getattr(route, "path", None) == "/v2/erp/inventory/fefo/reservations"
+        and "POST" in getattr(route, "methods", set())
+    ]
+    assert len(matching) == 1
+    assert matching[0].endpoint.__name__ == "allocate_fefo"
+
+
 def test_lot_receipt_quality_reservation_and_fefo_listing():
     h = account("advancedlot")
     p = product(h)
