@@ -1,5 +1,6 @@
 import base64
 import os
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
 
@@ -11,6 +12,7 @@ os.environ["MOLIDO_DATA_KEY"] = base64.urlsafe_b64encode(b"abcdefghijklmnopqrstu
 os.environ["MOLIDO_DB_PATH"] = str(DB)
 os.environ["MOLIDO_INVENTORY_APPROVAL_TOKEN"] = "inventory-approval-token-for-ci-minimum-32"
 os.environ["MOLIDO_COST_APPROVAL_TOKEN"] = "cost-approval-token-for-ci-minimum-32"
+os.environ["MOLIDO_LEDGER_APPROVAL_TOKEN"] = "ledger-approval-token-for-ci-minimum-32"
 
 from fastapi.testclient import TestClient
 import app as app_module
@@ -257,7 +259,8 @@ def test_customer_and_supplier_returns_require_approval_and_keep_ledger_history(
     customer = client.post("/v2/erp/inventory/returns", headers=h, json={
         "idempotencyKey":"customer-return-001","direction":"CUSTOMER_RETURN",
         "lotId":received["lotId"],"warehouseId":w,"quantity":"3",
-        "referenceId":"SO-RETURN-1","reason":"Customer returned damaged packaging"
+        "referenceId":"SO-RETURN-1","reason":"Customer returned damaged packaging",
+        "accountingAmount":"300","currency":"IRR"
     })
     assert customer.status_code == 200 and customer.json()["status"] == "pending_approval"
     approval_headers = {**h, "X-Approval-Token":os.environ["MOLIDO_INVENTORY_APPROVAL_TOKEN"]}
@@ -265,19 +268,30 @@ def test_customer_and_supplier_returns_require_approval_and_keep_ledger_history(
         f"/v2/erp/inventory/returns/{customer.json()['documentId']}/approve",
         headers=approval_headers, json={"idempotencyKey":"approve-customer-return-001"})
     assert approved_customer.status_code == 200, approved_customer.text
+    assert approved_customer.json()["accountingStatus"] == "PENDING_LEDGER_APPROVAL"
+    customer_journal = client.post(
+        f"/v1/erp/ledger/journals/{approved_customer.json()['journalId']}/approve",
+        headers={**h,"X-Approval-Token":os.environ["MOLIDO_LEDGER_APPROVAL_TOKEN"]})
+    assert customer_journal.status_code == 200 and customer_journal.json()["status"] == "POSTED"
     returned_lot = client.get(f"/v2/erp/inventory/lots/{approved_customer.json()['lotId']}/trace",
                               headers=h).json()["lot"]
     assert returned_lot["qualityState"] == "PENDING_INSPECTION"
     supplier = client.post("/v2/erp/inventory/returns", headers=h, json={
         "idempotencyKey":"supplier-return-001","direction":"SUPPLIER_RETURN",
         "lotId":received["lotId"],"warehouseId":w,"quantity":"4",
-        "referenceId":"PO-RETURN-1","reason":"Supplier quality claim"
+        "referenceId":"PO-RETURN-1","reason":"Supplier quality claim",
+        "accountingAmount":"200","currency":"IRR"
     })
     assert supplier.status_code == 200
     approved_supplier = client.post(
         f"/v2/erp/inventory/returns/{supplier.json()['documentId']}/approve",
         headers=approval_headers, json={"idempotencyKey":"approve-supplier-return-001"})
     assert approved_supplier.status_code == 200, approved_supplier.text
+    assert approved_supplier.json()["accountingStatus"] == "PENDING_LEDGER_APPROVAL"
+    supplier_journal = client.post(
+        f"/v1/erp/ledger/journals/{approved_supplier.json()['journalId']}/approve",
+        headers={**h,"X-Approval-Token":os.environ["MOLIDO_LEDGER_APPROVAL_TOKEN"]})
+    assert supplier_journal.status_code == 200 and supplier_journal.json()["status"] == "POSTED"
     trace = client.get(f"/v2/erp/inventory/lots/{received['lotId']}/trace", headers=h).json()
     assert [x["type"] for x in trace["movements"]][-1] == "SUPPLIER_RETURN"
     assert trace["balances"][0]["quantity"] == "16"
@@ -289,10 +303,19 @@ def test_scrap_and_cycle_count_are_approval_gated_and_idempotent():
     w = warehouse(h, "SCRAPCOUNT")
     received = lot(h, p, w, "scrap-count-lot-01", "SCRAP-COUNT-LOT", "10")
     release(h, received["lotId"])
+    gh,cycle="gh-scrap-001","cycle-scrap-001"
+    sync=client.post("/v1/sync/push",headers=h,json={"operations":[
+        {"idempotencyKey":"gh-scrap-create-001","entityType":"greenhouse","entityId":gh,
+         "operation":"CREATE","payload":{"name":"Waste Cost Greenhouse"},"baseVersion":0},
+        {"idempotencyKey":"cycle-scrap-create-001","entityType":"crop_cycle","entityId":cycle,
+         "operation":"CREATE","payload":{"greenhouseId":gh,"cropCode":"CUCUMBER"},"baseVersion":0}
+    ]})
+    assert sync.status_code == 200, sync.text
     scrap = client.post("/v2/erp/inventory/scrap", headers=h, json={
         "idempotencyKey":"scrap-doc-0001","lotId":received["lotId"],"warehouseId":w,
         "quantity":"2","reasonCode":"DAMAGED","reason":"Damaged produce",
-        "sourceReference":"QC-REPORT-1"
+        "sourceReference":"QC-REPORT-1","greenhouseId":gh,"cropCycleId":cycle,
+        "unitCost":"5","currency":"IRR"
     })
     assert scrap.status_code == 200 and scrap.json()["status"] == "pending_approval"
     approval_headers = {**h, "X-Approval-Token":os.environ["MOLIDO_INVENTORY_APPROVAL_TOKEN"]}
@@ -300,11 +323,19 @@ def test_scrap_and_cycle_count_are_approval_gated_and_idempotent():
         f"/v2/erp/inventory/scrap/{scrap.json()['documentId']}/approve",
         headers=approval_headers, json={"idempotencyKey":"approve-scrap-0001"})
     assert posted_scrap.status_code == 200, posted_scrap.text
+    wrong_replay = client.post(
+        f"/v2/erp/inventory/scrap/{scrap.json()['documentId']}/approve",
+        headers=approval_headers, json={"idempotencyKey":"approve-scrap-0001"})
+    assert wrong_replay.status_code == 200 and wrong_replay.json() == posted_scrap.json()
     count = client.post("/v2/erp/inventory/cycle-counts", headers=h, json={
         "idempotencyKey":"cycle-count-0001","warehouseId":w,"reason":"Weekly physical count",
         "lines":[{"lotId":received["lotId"],"countedQuantity":"7"}]
     })
     assert count.status_code == 200 and count.json()["variances"][0]["variance"] == "-1"
+    cross_document_replay = client.post(
+        f"/v2/erp/inventory/cycle-counts/{count.json()['documentId']}/approve",
+        headers=approval_headers, json={"idempotencyKey":"approve-scrap-0001"})
+    assert cross_document_replay.status_code == 409
     posted_count = client.post(
         f"/v2/erp/inventory/cycle-counts/{count.json()['documentId']}/approve",
         headers=approval_headers, json={"idempotencyKey":"approve-count-0001"})
@@ -464,3 +495,28 @@ def test_fefo_allocator_uses_earliest_expiry_and_is_idempotent():
         **body, "idempotencyKey": "fefo-allocation-order-02", "referenceId": "fefo-order-2", "quantity": "20"
     })
     assert insufficient.status_code == 409
+
+def test_fefo_concurrent_allocations_never_reserve_more_than_available_stock():
+    h = account("fefo-concurrency")
+    p = product(h, "CUC-FEFO-RACE")
+    w = warehouse(h, "FEFO-RACE")
+    received = lot(h, p, w, "fefo-race-receipt-01", "FEFO-RACE-LOT", "10")
+    release(h, received["lotId"])
+
+    def reserve(index):
+        return client.post("/v2/erp/inventory/fefo/allocate", headers=h, json={
+            "idempotencyKey": f"fefo-race-request-{index:02d}",
+            "warehouseId": w, "productId": p, "referenceType": "SALES_ORDER",
+            "referenceId": f"SO-FEFO-RACE-{index:02d}", "quantity": "2"
+        })
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        responses = list(pool.map(reserve, range(8)))
+    successes = [response for response in responses if response.status_code == 200]
+    conflicts = [response for response in responses if response.status_code == 409]
+    assert len(successes) == 5, [(r.status_code, r.text) for r in responses]
+    assert len(conflicts) == 3, [(r.status_code, r.text) for r in responses]
+    assert all(response.status_code in (200, 409) for response in responses)
+    trace = client.get(f"/v2/erp/inventory/lots/{received['lotId']}/trace", headers=h).json()
+    active = sum(Decimal(row["quantity"]) for row in trace["reservations"] if row["state"] == "ACTIVE")
+    assert active == Decimal("10")
