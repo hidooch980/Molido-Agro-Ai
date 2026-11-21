@@ -11,7 +11,6 @@ os.environ["MOLIDO_DB_PATH"] = str(DB)
 
 from fastapi.testclient import TestClient
 import app as app_module
-app_module.DB_PATH = DB
 
 client = TestClient(app_module.app)
 
