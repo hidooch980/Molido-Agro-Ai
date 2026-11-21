@@ -15,10 +15,13 @@ import com.molido.agroai.data.BusinessLocalStore
 import com.molido.agroai.data.BusinessSyncScheduler
 import com.molido.agroai.data.SyncPayloadCipher
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+
+private const val LOCAL_BUSINESS_ACCOUNT_ID = "local-device"
 
 private val businessKinds = listOf(
     "CUSTOMER" to "مشتری",
@@ -52,31 +55,40 @@ fun CrmErpPage(accountId: String?, legacyRecords: List<com.molido.agroai.data.Bu
 
     LaunchedEffect(accountId) {
         records = emptyList()
-        if (!accountId.isNullOrBlank()) {
-            BusinessLocalStore.get(context).businessDao().observe(accountId).collect { records = it }
+        val dao = BusinessLocalStore.get(context).businessDao()
+        val localRecords = dao.observe(LOCAL_BUSINESS_ACCOUNT_ID)
+        if (accountId.isNullOrBlank()) {
+            localRecords.collect { records = it }
+        } else {
+            combine(dao.observe(accountId), localRecords) { accountRecords, deviceRecords ->
+                (accountRecords + deviceRecords).sortedByDescending { it.createdAtEpochMillis }
+            }.collect { records = it }
         }
     }
 
     fun persist(type: String, payload: JSONObject) {
-        val uid = accountId
-        if (uid.isNullOrBlank()) {
-            onNotice("برای ثبت اطلاعات CRM و ERP ابتدا وارد حساب کاربری شوید.")
-            return
-        }
+        val signedInAccount = accountId?.takeIf { it.isNotBlank() }
+        val storageAccount = signedInAccount ?: LOCAL_BUSINESS_ACCOUNT_ID
         scope.launch {
             runCatching {
                 val entityId = UUID.randomUUID().toString()
                 val dao = BusinessLocalStore.get(context).businessDao()
                 dao.put(BusinessLocalRecord(
                     id = UUID.randomUUID().toString(),
-                    accountId = uid,
+                    accountId = storageAccount,
                     entityType = type,
                     entityId = entityId,
-                    encryptedPayload = SyncPayloadCipher.encrypt(context, payload.put("id", entityId).toString())
+                    encryptedPayload = SyncPayloadCipher.encrypt(context, payload.put("id", entityId).toString()),
+                    syncState = if (signedInAccount == null) "LOCAL_ONLY" else "PENDING"
                 ))
-                BusinessSyncScheduler.enqueue(context)
+                if (signedInAccount != null) BusinessSyncScheduler.enqueue(context)
             }.onSuccess {
-                onNotice("اطلاعات به‌صورت محلی و رمزگذاری‌شده ذخیره شد؛ همگام‌سازی در صف قرار گرفت.")
+                onNotice(
+                    if (signedInAccount == null)
+                        "اطلاعات رمزگذاری‌شده فقط روی این دستگاه ذخیره شد؛ حساب کاربری لازم نیست."
+                    else
+                        "اطلاعات محلی ذخیره شد؛ همگام‌سازی حساب در صف قرار گرفت."
+                )
                 name = ""; phone = ""; subject = ""; description = ""
             }.onFailure {
                 onNotice("ذخیره اطلاعات ناموفق بود: " + (it.message ?: "خطای نامشخص"))
@@ -96,13 +108,13 @@ fun CrmErpPage(accountId: String?, legacyRecords: List<com.molido.agroai.data.Bu
         Text("ثبت آفلاین با رمزگذاری محلی؛ ارسال خودکار پس از اتصال امن به سرور", style = MaterialTheme.typography.bodySmall)
         if (accountId.isNullOrBlank()) {
             Card(shape = RoundedCornerShape(14.dp)) {
-                Text("برای نگهداری اطلاعات خصوصی، ابتدا وارد حساب شوید.", modifier = Modifier.padding(16.dp))
+                Text("حالت محلی بدون حساب فعال است؛ اطلاعات رمزگذاری‌شده فقط روی همین دستگاه ذخیره می‌شود.", modifier = Modifier.padding(16.dp))
             }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("در انتظار همگام‌سازی: " + records.count { it.syncState == "PENDING" }, style = MaterialTheme.typography.labelLarge)
+                Text("در انتظار همگام‌سازی: " + records.count { it.accountId == accountId && it.syncState == "PENDING" }, style = MaterialTheme.typography.labelLarge)
                 Text("•", color = MaterialTheme.colorScheme.primary)
-                Text("تعارض: " + records.count { it.syncState == "CONFLICT" }, style = MaterialTheme.typography.labelLarge)
+                Text("تعارض: " + records.count { it.accountId == accountId && it.syncState == "CONFLICT" }, style = MaterialTheme.typography.labelLarge)
             }
             Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 businessKinds.forEach { (key, title) ->
