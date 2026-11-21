@@ -117,6 +117,17 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
           UNIQUE(user_id,idempotency_key)
         );
         CREATE INDEX IF NOT EXISTS idx_crop_cost_cycle ON crop_cost_entries(user_id,crop_cycle_id,created_at);
+        CREATE TABLE IF NOT EXISTS approval_ledger_accounts(
+          user_id TEXT NOT NULL, account_code TEXT NOT NULL, name TEXT NOT NULL,
+          account_type TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+          PRIMARY KEY(user_id,account_code)
+        );
+        CREATE TABLE IF NOT EXISTS approval_ledger_journals(
+          user_id TEXT NOT NULL, journal_id TEXT NOT NULL, reference TEXT,
+          description TEXT NOT NULL, currency TEXT NOT NULL, total_debit REAL NOT NULL,
+          status TEXT NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL,
+          PRIMARY KEY(user_id,journal_id)
+        );
         CREATE TABLE IF NOT EXISTS crop_cost_runs(
           run_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL,
           greenhouse_id TEXT NOT NULL, crop_cycle_id TEXT NOT NULL, version INTEGER NOT NULL,
@@ -342,19 +353,6 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                               data["productId"],data["warehouseId"],q,"SALES_RETURN",data["referenceId"],now)
             journal_id = None
             if data.get("accountingAmount") is not None:
-                c.executescript("""
-                CREATE TABLE IF NOT EXISTS approval_ledger_accounts(
-                  user_id TEXT NOT NULL, account_code TEXT NOT NULL, name TEXT NOT NULL,
-                  account_type TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
-                  PRIMARY KEY(user_id,account_code)
-                );
-                CREATE TABLE IF NOT EXISTS approval_ledger_journals(
-                  user_id TEXT NOT NULL, journal_id TEXT NOT NULL, reference TEXT,
-                  description TEXT NOT NULL, currency TEXT NOT NULL, total_debit REAL NOT NULL,
-                  status TEXT NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL,
-                  PRIMARY KEY(user_id,journal_id)
-                );
-                """)
                 ledger_accounts = [
                     ("1100","حساب‌های دریافتنی","ASSET"),
                     ("1200","موجودی کالا","ASSET"),
