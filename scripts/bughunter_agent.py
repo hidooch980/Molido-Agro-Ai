@@ -50,7 +50,7 @@ def safe_fixes(enabled: bool) -> dict:
  if not enabled: return {'enabled': False, 'status': 'not_requested', 'changed_files': []}
  ruff = shutil.which('ruff')
  if not ruff: return {'enabled': True, 'status': 'skipped_tool_unavailable', 'changed_files': []}
- p = subprocess.run([ruff, 'check', '--fix', 'server'], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+ p = subprocess.run([ruff, 'check', '--fix', '--fix-only', '--select', 'F401,F541,E711,E712', 'server'], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
  global _SAFE_FIX_RESULT_SNAPSHOT
  changed = []
  for name, original in _SAFE_FIX_SNAPSHOT.items():
@@ -58,7 +58,7 @@ def safe_fixes(enabled: bool) -> dict:
   if path.is_file() and path.read_bytes() != original:
    changed.append(name)
  _SAFE_FIX_RESULT_SNAPSHOT = {name: (ROOT / name).read_bytes() for name in changed}
- return {'enabled': True, 'status': 'completed' if p.returncode == 0 else 'needs_review', 'exit_code': p.returncode, 'changed_files': sorted(changed), 'output_tail': '\n'.join((p.stdout or '').splitlines()[-60:])}
+ return {'enabled': True, 'status': 'completed' if p.returncode == 0 else 'needs_review', 'exit_code': p.returncode, 'rule_allowlist': ['F401','F541','E711','E712'], 'changed_files': sorted(changed), 'output_tail': '\n'.join((p.stdout or '').splitlines()[-60:])}
 def main() -> int:
  ap=argparse.ArgumentParser(); ap.add_argument('--report-dir',default='artifacts/bughunter'); ap.add_argument('--timeout',type=int,default=1800); ap.add_argument('--apply-safe-fixes',action='store_true'); args=ap.parse_args()
  outdir=ROOT/args.report_dir; outdir.mkdir(parents=True,exist_ok=True)
@@ -71,9 +71,12 @@ def main() -> int:
  elif shutil.which('gradle') and (ROOT/'app').is_dir(): checks.append(run_check('android_unit_tests',['gradle','--no-daemon',':app:testDebugUnitTest'],args.timeout))
  if not checks: checks.append(Check('discovery',[],'not_run',None,0.0,['no_test_runner'],'No supported test runner found.'))
  passed=sum(c.status=='passed' for c in checks); failed=sum(c.status in ('failed','timed_out') for c in checks)
- drift = [name for name, expected in _SAFE_FIX_RESULT_SNAPSHOT.items() if not (ROOT / name).is_file() or (ROOT / name).read_bytes() != expected]
+ current_python = {p.relative_to(ROOT).as_posix(): p.read_bytes() for p in (ROOT / 'server').rglob('*.py') if p.is_file()}
+ drift = sorted(name for name, expected in _SAFE_FIX_RESULT_SNAPSHOT.items() if current_python.get(name) != expected)
+ drift.extend(sorted(set(current_python) - set(_SAFE_FIX_RESULT_SNAPSHOT)))
  if fixes.get('enabled') and fixes.get('changed_files') and (passed != len(checks) or fixes.get('status') != 'completed' or drift):
-  fixes['rollback_files'] = rollback_safe_fixes(_SAFE_FIX_SNAPSHOT, fixes['changed_files'])
+  rollback_targets = sorted(set(fixes['changed_files']) | set(drift))
+  fixes['rollback_files'] = rollback_safe_fixes(_SAFE_FIX_SNAPSHOT, rollback_targets)
   fixes['status'] = 'rolled_back' if fixes['rollback_files'] else 'needs_review'
   fixes['changed_files'] = []
   if drift: fixes['test_side_effects_detected'] = drift
