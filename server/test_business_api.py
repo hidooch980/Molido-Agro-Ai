@@ -267,9 +267,10 @@ def test_crm_lead_and_ticket_are_isolated_and_statuses_transition():
     owner = account("crmstatusowner")
     other = account("crmstatusother")
     lead = client.post("/v1/crm/leads", headers=owner, json={"title": "Lead One"}).json()
+    customer = create_customer(owner)
     ticket = client.post("/v1/crm/tickets", headers=owner, json={
-        "subject": "Damaged packaging", "description": "Customer reports damaged packaging",
-        "priority": "URGENT"
+        "customerId": customer["id"], "subject": "Damaged packaging",
+        "description": "Customer reports damaged packaging", "priority": "URGENT"
     }).json()
     assert client.get("/v1/crm/leads", headers=other).json()["items"] == []
     assert client.get("/v1/crm/tickets", headers=other).json()["items"] == []
