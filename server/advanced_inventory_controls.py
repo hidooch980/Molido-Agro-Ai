@@ -371,6 +371,29 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                 on_hand = balance(c,user,body.warehouseId,body.lotId)
                 if on_hand - reserved(c,user,body.warehouseId,body.lotId) < requested:
                     raise HTTPException(409,"Supplier return exceeds unreserved stock")
+            else:
+                shipped_rows = c.execute(
+                    """SELECT quantity FROM adv_stock_movements
+                       WHERE user_id=? AND lot_id=? AND reference_type='SALES_ORDER'
+                         AND reference_id=? AND movement_type IN ('SHIPMENT_ISSUE','ISSUE')""",
+                    (user,body.lotId,body.referenceId),
+                ).fetchall()
+                shipped_quantity = sum((Decimal(row["quantity"]) for row in shipped_rows), Decimal("0"))
+                if shipped_quantity <= 0:
+                    raise HTTPException(409,"Customer return must reference an actual shipment of this lot")
+                prior_docs = c.execute(
+                    "SELECT state,payload FROM adv_inventory_control_docs WHERE user_id=? AND document_type='RETURN'",
+                    (user,),
+                ).fetchall()
+                previously_returned = Decimal("0")
+                for prior in prior_docs:
+                    prior_data = json.loads(prior["payload"])
+                    if (prior_data.get("direction") == "CUSTOMER_RETURN"
+                        and prior_data.get("lotId") == body.lotId
+                        and prior_data.get("referenceId") == body.referenceId):
+                        previously_returned += Decimal(prior_data["quantity"])
+                if previously_returned + requested > shipped_quantity:
+                    raise HTTPException(409,"Customer return quantity exceeds shipped quantity after prior returns")
             payload = {"direction":body.direction,"lotId":body.lotId,"warehouseId":body.warehouseId,
                        "quantity":format(requested,"f"),"referenceId":body.referenceId,
                        "reason":body.reason,"productId":lot["product_id"],"lotCode":lot["lot_code"],
