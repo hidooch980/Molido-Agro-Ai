@@ -8,6 +8,7 @@ if DB.exists():
 os.environ["MOLIDO_JWT_SECRET"] = "advanced-inventory-test-secret-minimum-32"
 os.environ["MOLIDO_DATA_KEY"] = base64.urlsafe_b64encode(b"abcdefghijklmnopqrstuvwxyz123456").decode().rstrip("=")
 os.environ["MOLIDO_DB_PATH"] = str(DB)
+os.environ["MOLIDO_INVENTORY_APPROVAL_TOKEN"] = "inventory-approval-token-for-ci-minimum-32"
 
 from fastapi.testclient import TestClient
 import app as app_module
@@ -216,3 +217,96 @@ def test_lot_trace_returns_full_history_and_is_account_scoped():
     assert data["qualityHistory"][0]["to"] == "RELEASED"
     assert data["balances"][0]["quantity"] == "18"
     assert client.get(f"/v2/erp/inventory/lots/{lot_id}/trace", headers=other).status_code == 404
+
+
+
+def test_fefo_reserves_earliest_expiry_across_multiple_lots_and_is_idempotent():
+    h = account("fefoalloc")
+    p = product(h, "CUC-FEFO-01")
+    w = warehouse(h, "FEFO")
+    def receive(code, expiry, quantity):
+        response = client.post("/v2/erp/inventory/lots", headers=h, json={
+            "idempotencyKey": "fefo-receipt-" + code, "warehouseId": w, "productId": p,
+            "lotCode": code, "quantity": quantity, "unit": "kg",
+            "receivedDate": "2026-11-20", "expiryDate": expiry, "sourceType": "SUPPLIER"
+        })
+        assert response.status_code == 200, response.text
+        release(h, response.json()["lotId"])
+        return response.json()["lotId"]
+    later = receive("FEFO-LATE", "2027-02-01", "8")
+    earlier = receive("FEFO-EARLY", "2026-12-01", "5")
+    body = {"idempotencyKey":"fefo-order-0001","productId":p,"warehouseId":w,
+            "quantity":"10","referenceType":"SALES_ORDER","referenceId":"SO-FEFO-1"}
+    reserved = client.post("/v2/erp/inventory/fefo/reservations", headers=h, json=body)
+    assert reserved.status_code == 200, reserved.text
+    allocations = reserved.json()["allocations"]
+    assert allocations[0]["lotId"] == earlier and allocations[0]["quantity"] == "5"
+    assert allocations[1]["lotId"] == later and allocations[1]["quantity"] == "5"
+    duplicate = client.post("/v2/erp/inventory/fefo/reservations", headers=h, json=body)
+    assert duplicate.status_code == 200 and duplicate.json()["status"] == "duplicate"
+
+
+def test_customer_and_supplier_returns_require_approval_and_keep_ledger_history():
+    h = account("returnflows")
+    p = product(h, "CUC-RETURN-01")
+    w = warehouse(h, "RETURNS")
+    received = lot(h, p, w, "return-base-lot-01", "RETURN-BASE", "20")
+    release(h, received["lotId"])
+    customer = client.post("/v2/erp/inventory/returns", headers=h, json={
+        "idempotencyKey":"customer-return-001","direction":"CUSTOMER_RETURN",
+        "lotId":received["lotId"],"warehouseId":w,"quantity":"3",
+        "referenceId":"SO-RETURN-1","reason":"Customer returned damaged packaging"
+    })
+    assert customer.status_code == 200 and customer.json()["status"] == "pending_approval"
+    approval_headers = {**h, "X-Approval-Token":os.environ["MOLIDO_INVENTORY_APPROVAL_TOKEN"]}
+    approved_customer = client.post(
+        f"/v2/erp/inventory/returns/{customer.json()['documentId']}/approve",
+        headers=approval_headers, json={"idempotencyKey":"approve-customer-return-001"})
+    assert approved_customer.status_code == 200, approved_customer.text
+    returned_lot = client.get(f"/v2/erp/inventory/lots/{approved_customer.json()['lotId']}/trace",
+                              headers=h).json()["lot"]
+    assert returned_lot["qualityState"] == "PENDING_INSPECTION"
+    supplier = client.post("/v2/erp/inventory/returns", headers=h, json={
+        "idempotencyKey":"supplier-return-001","direction":"SUPPLIER_RETURN",
+        "lotId":received["lotId"],"warehouseId":w,"quantity":"4",
+        "referenceId":"PO-RETURN-1","reason":"Supplier quality claim"
+    })
+    assert supplier.status_code == 200
+    approved_supplier = client.post(
+        f"/v2/erp/inventory/returns/{supplier.json()['documentId']}/approve",
+        headers=approval_headers, json={"idempotencyKey":"approve-supplier-return-001"})
+    assert approved_supplier.status_code == 200, approved_supplier.text
+    trace = client.get(f"/v2/erp/inventory/lots/{received['lotId']}/trace", headers=h).json()
+    assert [x["type"] for x in trace["movements"]][-1] == "SUPPLIER_RETURN"
+    assert trace["balances"][0]["quantity"] == "16"
+
+
+def test_scrap_and_cycle_count_are_approval_gated_and_idempotent():
+    h = account("scrapcount")
+    p = product(h, "CUC-SCRAP-COUNT")
+    w = warehouse(h, "SCRAPCOUNT")
+    received = lot(h, p, w, "scrap-count-lot-01", "SCRAP-COUNT-LOT", "10")
+    release(h, received["lotId"])
+    scrap = client.post("/v2/erp/inventory/scrap", headers=h, json={
+        "idempotencyKey":"scrap-doc-0001","lotId":received["lotId"],"warehouseId":w,
+        "quantity":"2","reasonCode":"DAMAGED","reason":"Damaged produce",
+        "sourceReference":"QC-REPORT-1"
+    })
+    assert scrap.status_code == 200 and scrap.json()["status"] == "pending_approval"
+    approval_headers = {**h, "X-Approval-Token":os.environ["MOLIDO_INVENTORY_APPROVAL_TOKEN"]}
+    posted_scrap = client.post(
+        f"/v2/erp/inventory/scrap/{scrap.json()['documentId']}/approve",
+        headers=approval_headers, json={"idempotencyKey":"approve-scrap-0001"})
+    assert posted_scrap.status_code == 200, posted_scrap.text
+    count = client.post("/v2/erp/inventory/cycle-counts", headers=h, json={
+        "idempotencyKey":"cycle-count-0001","warehouseId":w,"reason":"Weekly physical count",
+        "lines":[{"lotId":received["lotId"],"countedQuantity":"7"}]
+    })
+    assert count.status_code == 200 and count.json()["variances"][0]["variance"] == "-1"
+    posted_count = client.post(
+        f"/v2/erp/inventory/cycle-counts/{count.json()['documentId']}/approve",
+        headers=approval_headers, json={"idempotencyKey":"approve-count-0001"})
+    assert posted_count.status_code == 200, posted_count.text
+    balance_row = next(x for x in client.get("/v2/erp/inventory/balances",headers=h).json()["items"]
+                       if x["lotId"] == received["lotId"])
+    assert balance_row["quantity"] == "7"
