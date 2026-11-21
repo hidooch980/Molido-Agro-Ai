@@ -27,6 +27,11 @@ def test_idempotency_and_conflict(tmp_path, monkeypatch):
     op={"idempotencyKey":"same-key","entityType":"inventory_item","entityId":"x","operation":"CREATE","payload":{"quantity":1},"baseVersion":0}
     assert c.post("/v1/sync/push",json={"operations":[op]},headers=h).json()["results"][0]["status"]=="applied"
     assert c.post("/v1/sync/push",json={"operations":[op]},headers=h).json()["results"][0]["status"]=="applied"
+    changed_same_key={**op,"payload":{"quantity":999}}
+    changed_result=c.post("/v1/sync/push",json={"operations":[changed_same_key]},headers=h).json()["results"][0]
+    assert changed_result["status"]=="conflict"
+    unchanged=c.post("/v1/sync/pull",json={"cursor":0},headers=h).json()["changes"]
+    assert unchanged[0]["payload"]["quantity"]==1
     stale={**op,"idempotencyKey":"stale-key","payload":{"quantity":2},"baseVersion":0}
     assert c.post("/v1/sync/push",json={"operations":[stale]},headers=h).json()["results"][0]["status"]=="conflict"
 
@@ -50,6 +55,23 @@ def test_harvest_sync_accepts_current_and_legacy_entity_types(tmp_path, monkeypa
         response = client.post("/v1/sync/push",json={"operations":[operation]},headers=headers)
         assert response.status_code == 200, response.text
         assert response.json()["results"][0]["status"] == "applied"
+
+
+def test_operations_table_migrates_request_hash_without_losing_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DB_PATH", tmp_path / "legacy-operations.sqlite3")
+    with app.db() as connection:
+        connection.execute("""CREATE TABLE operations(
+            user_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,result TEXT NOT NULL,
+            created_at INTEGER NOT NULL,PRIMARY KEY(user_id,idempotency_key)
+        )""")
+        connection.execute("INSERT INTO operations VALUES(?,?,?,?)",("legacy-user","legacy-key",'{"status":"applied"}',1))
+    app.init_db()
+    with app.db() as connection:
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(operations)").fetchall()}
+        legacy = connection.execute("SELECT result,request_hash FROM operations WHERE idempotency_key='legacy-key'").fetchone()
+    assert "request_hash" in columns
+    assert legacy["result"] == '{"status":"applied"}'
+    assert legacy["request_hash"] == ""
 
 
 def test_change_log_cursor_paginates_without_skipping_rows(tmp_path, monkeypatch):
