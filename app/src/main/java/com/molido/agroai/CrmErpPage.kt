@@ -105,7 +105,7 @@ fun CrmErpPage(accountId: String?, legacyRecords: List<com.molido.agroai.data.Bu
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         TextButton(onClick = { showLegacyRecords = true }) { Text("سوابق عمومی قدیمی") }
         Text("مدیریت مشتری و کسب‌وکار", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Text("ثبت آفلاین با رمزگذاری محلی؛ ارسال خودکار پس از اتصال امن به سرور", style = MaterialTheme.typography.bodySmall)
+        Text(if (accountId.isNullOrBlank()) "ثبت محلی رمزگذاری‌شده؛ بدون نیاز به حساب" else "ثبت آفلاین با رمزگذاری محلی؛ ارسال خودکار پس از اتصال امن به سرور", style = MaterialTheme.typography.bodySmall)
         if (accountId.isNullOrBlank()) {
             Card(shape = RoundedCornerShape(14.dp)) {
                 Text("حالت محلی بدون حساب فعال است؛ اطلاعات رمزگذاری‌شده فقط روی همین دستگاه ذخیره می‌شود.", modifier = Modifier.padding(16.dp))
