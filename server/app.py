@@ -164,3 +164,7 @@ register_approval_ledger_routes(app, db, current_user, encrypt_payload, decrypt_
 
 from advanced_inventory import register_advanced_inventory_routes
 register_advanced_inventory_routes(app, db, current_user)
+
+
+from production_costing import register_production_costing_routes
+register_production_costing_routes(app, db, current_user, decrypt_payload)
