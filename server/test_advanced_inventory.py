@@ -54,9 +54,9 @@ def lot(headers, product_id, warehouse_id, key="lot-receipt-0001", code="LOT-202
 
 
 def release(headers, lot_id):
-    response = client.post(f"/v2/erp/inventory/lots/{lot_id}/quality", headers=headers, json={
-        "state": "RELEASED", "reason": "Inspection passed"
-    })
+    response = client.post(f"/v2/erp/inventory/lots/{lot_id}/quality",
+        headers={**headers, "X-Approval-Token": os.environ["MOLIDO_INVENTORY_APPROVAL_TOKEN"]},
+        json={"state": "RELEASED", "reason": "Inspection passed"})
     assert response.status_code == 200, response.text
 
 
@@ -131,9 +131,9 @@ def test_quarantine_prevents_reservation_and_release_is_audited():
     w = warehouse(h, "QUALITY")
     received = lot(h, p, w, "quality-lot-0001", "QUALITY-LOT", "8")
     release(h, received["lotId"])
-    quarantined = client.post(f"/v2/erp/inventory/lots/{received['lotId']}/quality", headers=h, json={
-        "state": "QUARANTINED", "reason": "Packaging damage", "evidenceRef": "photo:qc-1"
-    })
+    quarantined = client.post(f"/v2/erp/inventory/lots/{received['lotId']}/quality",
+        headers={**h, "X-Approval-Token": os.environ["MOLIDO_INVENTORY_APPROVAL_TOKEN"]},
+        json={"state": "QUARANTINED", "reason": "Packaging damage", "evidenceRef": "photo:qc-1"})
     assert quarantined.status_code == 200
     reserved = client.post("/v2/erp/inventory/reservations", headers=h, json={
         "idempotencyKey": "reserve-quarantine-01", "lotId": received["lotId"], "warehouseId": w,
@@ -697,3 +697,16 @@ def test_fefo_allocation_idempotency_rejects_changed_request():
     assert same.status_code == 200 and same.json()["status"] == "duplicate"
     changed = client.post("/v2/erp/inventory/fefo/allocate", headers=h, json={**body,"quantity":"5"})
     assert changed.status_code == 409
+
+def test_quality_status_change_requires_separate_human_approval():
+    h = account("quality-approval-required")
+    p = product(h, "CUC-QC-APPROVAL")
+    w = warehouse(h, "QC-APPROVAL")
+    received = lot(h, p, w, key="qc-approval-lot-001", code="QC-APPROVAL-LOT", quantity="5")
+    endpoint = f"/v2/erp/inventory/lots/{received['lotId']}/quality"
+    denied = client.post(endpoint, headers=h, json={"state":"RELEASED","reason":"Inspection passed"})
+    assert denied.status_code == 403
+    approved = client.post(endpoint,
+        headers={**h,"X-Approval-Token":os.environ["MOLIDO_INVENTORY_APPROVAL_TOKEN"]},
+        json={"state":"RELEASED","reason":"Inspection passed"})
+    assert approved.status_code == 200, approved.text
