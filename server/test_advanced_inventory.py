@@ -9,6 +9,7 @@ os.environ["MOLIDO_JWT_SECRET"] = "advanced-inventory-test-secret-minimum-32"
 os.environ["MOLIDO_DATA_KEY"] = base64.urlsafe_b64encode(b"abcdefghijklmnopqrstuvwxyz123456").decode().rstrip("=")
 os.environ["MOLIDO_DB_PATH"] = str(DB)
 os.environ["MOLIDO_INVENTORY_APPROVAL_TOKEN"] = "inventory-approval-token-for-ci-minimum-32"
+os.environ["MOLIDO_COST_APPROVAL_TOKEN"] = "cost-approval-token-for-ci-minimum-32"
 
 from fastapi.testclient import TestClient
 import app as app_module
@@ -363,3 +364,67 @@ def test_purchase_order_receipt_creates_inspection_lots_and_links_supplier_order
     order_state = next(x for x in client.get("/v1/erp/orders",headers=h).json()["items"]
                        if x["id"] == order.json()["id"])
     assert order_state["status"] == "RECEIVED"
+
+
+
+def test_harvest_lot_sales_shipment_and_crop_cost_reconcile_end_to_end():
+    h = account("harvestcogs")
+    gh = "gh-cogs-001"
+    cycle = "cycle-cogs-001"
+    sync = client.post("/v1/sync/push", headers=h, json={"operations":[
+        {"idempotencyKey":"gh-cogs-create-001","entityType":"greenhouse","entityId":gh,
+         "operation":"CREATE","payload":{"name":"Greenhouse COGS"},"baseVersion":0},
+        {"idempotencyKey":"cycle-cogs-create-001","entityType":"crop_cycle","entityId":cycle,
+         "operation":"CREATE","payload":{"greenhouseId":gh,"cropCode":"CUCUMBER"},"baseVersion":0}
+    ]})
+    assert sync.status_code == 200, sync.text
+    p = product(h,"CUC-COGS-001")
+    harvest = client.post("/v1/erp/greenhouse/harvests",headers=h,json={
+        "greenhouseId":gh,"cropCycleId":cycle,"productId":p,"warehouseId":"main",
+        "quantity":10,"unitPrice":200,"unit":"kg","qualityGrade":"A"
+    })
+    assert harvest.status_code == 200, harvest.text
+    w = warehouse(h,"COGS-WH")
+    lot_response = client.post("/v2/erp/inventory/harvest-receipts",headers=h,json={
+        "idempotencyKey":"harvest-lot-cogs-001","harvestId":harvest.json()["id"],
+        "warehouseId":w,"lotCode":"HARVEST-COGS-001","expiryDate":"2026-12-10"
+    })
+    assert lot_response.status_code == 200, lot_response.text
+    release(h,lot_response.json()["lotId"])
+    cost = client.post("/v2/erp/costs/entries",headers=h,json={
+        "idempotencyKey":"cogs-cost-entry-001","greenhouseId":gh,"cropCycleId":cycle,
+        "category":"LABOR","amount":"1000","currency":"IRR",
+        "allocationMethod":"OUTPUT_QUANTITY","sourceReference":"HARVEST-COST-001"
+    })
+    assert cost.status_code == 200, cost.text
+    approved = client.post(f"/v2/erp/costs/entries/{cost.json()['entryId']}/approve",
+        headers={**h,"X-Approval-Token":os.environ["MOLIDO_COST_APPROVAL_TOKEN"]})
+    assert approved.status_code == 200, approved.text
+    run = client.post("/v2/erp/costs/runs",headers=h,json={
+        "idempotencyKey":"cogs-cost-run-001","greenhouseId":gh,"cropCycleId":cycle,"currency":"IRR"
+    })
+    assert run.status_code == 200, run.text
+    customer = client.post("/v1/crm/customers",headers=h,json={"name":"COGS Customer"})
+    order = client.post("/v1/erp/sales/orders",headers=h,json={
+        "partyId":customer.json()["id"],"lines":[{"productId":p,"quantity":10,"unitPrice":200}]
+    })
+    assert order.status_code == 200, order.text
+    reserve_order = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/fefo-reservations",
+        headers=h,json={"idempotencyKey":"cogs-order-reserve-001","warehouseId":w})
+    assert reserve_order.status_code == 200, reserve_order.text
+    confirm = client.post(f"/v1/erp/orders/{order.json()['id']}/transition",headers=h,
+        json={"action":"CONFIRM","idempotencyKey":"cogs-order-confirm-001"})
+    assert confirm.status_code == 200, confirm.text
+    shipped = client.post(f"/v2/erp/inventory/orders/{order.json()['id']}/fulfill",headers=h,
+        json={"idempotencyKey":"cogs-order-ship-001"})
+    assert shipped.status_code == 200, shipped.text
+    reconciliation = client.get(
+        f"/v2/erp/inventory/orders/{order.json()['id']}/cost-reconciliation",headers=h)
+    assert reconciliation.status_code == 200, reconciliation.text
+    data = reconciliation.json()
+    assert data["cogs"] == "1000"
+    assert data["profitabilityStatus"] == "PROVISIONAL_COGS"
+    assert data["grossMarginBeforeOtherAdjustments"] == "1000"
+    delivered = client.post(f"/v1/erp/orders/{order.json()['id']}/transition",headers=h,
+        json={"action":"DELIVER","idempotencyKey":"cogs-order-deliver-001"})
+    assert delivered.status_code == 200 and delivered.json()["status"] == "DELIVERED"
