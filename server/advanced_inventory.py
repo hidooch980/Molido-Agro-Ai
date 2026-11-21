@@ -300,6 +300,41 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
             c.execute("INSERT INTO adv_reservation_actions VALUES(?,?,?,?,?,?)",(user,body.idempotencyKey,reservation_id,body.action,json.dumps(result,separators=(",",":")),now))
         return result
 
+    @app.get("/v2/erp/inventory/lots/{lot_id}/trace")
+    def trace_lot(lot_id: str, authorization: str | None = Header(default=None)):
+        user=actor(authorization)
+        with db() as c:
+            schema(c)
+            lot=c.execute("""SELECT lot_id,product_id,lot_code,unit,manufacture_date,harvest_date,received_date,
+              expiry_date,source_type,source_id,quality_state,created_at FROM adv_lots
+              WHERE user_id=? AND lot_id=?""",(user,lot_id)).fetchone()
+            if not lot: raise HTTPException(404,"Lot not found in this account")
+            movements=c.execute("""SELECT movement_id,movement_type,source_warehouse_id,destination_warehouse_id,
+              quantity,reference_type,reference_id,actor_id,created_at FROM adv_stock_movements
+              WHERE user_id=? AND lot_id=? ORDER BY created_at,movement_id""",(user,lot_id)).fetchall()
+            reservations=c.execute("""SELECT reservation_id,warehouse_id,reference_type,reference_id,quantity,state,created_at
+              FROM adv_reservations WHERE user_id=? AND lot_id=? ORDER BY created_at,reservation_id""",(user,lot_id)).fetchall()
+            quality=c.execute("""SELECT event_id,from_state,to_state,reason,evidence_ref,actor_id,created_at
+              FROM adv_quality_events WHERE user_id=? AND lot_id=? ORDER BY created_at,event_id""",(user,lot_id)).fetchall()
+            balances=c.execute("""SELECT b.warehouse_id,w.code,w.name,b.quantity,b.updated_at
+              FROM adv_stock_balances b JOIN adv_warehouses w ON w.user_id=b.user_id AND w.warehouse_id=b.warehouse_id
+              WHERE b.user_id=? AND b.lot_id=? ORDER BY w.code""",(user,lot_id)).fetchall()
+        return {
+          "lot":{"id":lot["lot_id"],"productId":lot["product_id"],"lotCode":lot["lot_code"],"unit":lot["unit"],
+            "manufactureDate":lot["manufacture_date"],"harvestDate":lot["harvest_date"],"receivedDate":lot["received_date"],
+            "expiryDate":lot["expiry_date"],"sourceType":lot["source_type"],"sourceId":lot["source_id"],
+            "qualityState":lot["quality_state"],"createdAt":lot["created_at"]},
+          "movements":[{"id":r["movement_id"],"type":r["movement_type"],"sourceWarehouseId":r["source_warehouse_id"],
+            "destinationWarehouseId":r["destination_warehouse_id"],"quantity":r["quantity"],"referenceType":r["reference_type"],
+            "referenceId":r["reference_id"],"actorId":r["actor_id"],"createdAt":r["created_at"]} for r in movements],
+          "reservations":[{"id":r["reservation_id"],"warehouseId":r["warehouse_id"],"referenceType":r["reference_type"],
+            "referenceId":r["reference_id"],"quantity":r["quantity"],"state":r["state"],"createdAt":r["created_at"]} for r in reservations],
+          "qualityHistory":[{"id":r["event_id"],"from":r["from_state"],"to":r["to_state"],"reason":r["reason"],
+            "evidenceRef":r["evidence_ref"],"actorId":r["actor_id"],"createdAt":r["created_at"]} for r in quality],
+          "balances":[{"warehouseId":r["warehouse_id"],"warehouseCode":r["code"],"warehouseName":r["name"],
+            "quantity":r["quantity"],"updatedAt":r["updated_at"]} for r in balances]
+        }
+
     @app.get("/v2/erp/inventory/balances")
     def advanced_balances(authorization: str | None = Header(default=None)):
         user=actor(authorization)
