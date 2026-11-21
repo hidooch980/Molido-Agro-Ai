@@ -198,3 +198,33 @@ Gate E: Android workflows and bidirectional domain sync pass offline, replay and
 Gate F: security, concurrency, backup/restore and load tests pass.
 Gate G: signed APK installed and upgraded on a physical phone with evidence.
 Only after all applicable gates pass may the feature set be described as complete. Legal/statutory claims additionally require documented external professional sign-off.
+
+
+## 9. Implementation progress (2026-11-21)
+
+This section records code actually added on `feature/advanced-inventory-costing-iran-accounting`. It does not replace the delivery gates above.
+
+### Implemented in source; CI/device verification pending
+- `server/advanced_inventory.py`: account-scoped warehouse master, lot receipt with manufacture/harvest/received/expiry metadata, immutable movement rows, lot-level balances, atomic warehouse transfer, quality-state history, reservation checks, and expiry-aware lot listing.
+- Routes are mounted under `/v2/erp/inventory`; existing `/v1/erp/inventory` routes and tables are retained unchanged.
+- Quantities in the new lot APIs are parsed as Decimal and persisted as decimal text; transfer and reservation calculations do not use binary floating point.
+- New tests in `server/test_advanced_inventory.py` cover pending-inspection blocking, receipt idempotency, released-lot reservations, atomic transfers, insufficient stock, quarantine blocking, and tenant isolation.
+- `server/production_costing.py`: account-scoped crop-cycle cost entries, source references, Decimal amount storage, explicit approval gate using the server-side `MOLIDO_COST_APPROVAL_TOKEN`, versioned cost runs, harvest-quantity allocation, and separate abnormal-waste reporting.
+- Cost runs currently calculate production cost per unit only. They deliberately return `NOT_CALCULATED_SALES_LINK_REQUIRED` for profitability until actual shipment/return/discount/revenue events are linked and reconciled.
+- New tests in `server/test_production_costing.py` cover approval gating, idempotent cost runs, cost allocation, abnormal-waste separation, and tenant isolation.
+- The Android release workflow now runs on pushes to this feature branch so the full existing API, emulator, and signed-APK CI jobs can validate it.
+
+### Not implemented / not accepted yet
+- Lot genealogy/split/merge/grade/pack transformations; mass-balance and trace-forward/trace-back reports.
+- Customer/supplier returns, approved stock adjustments, scrap workflow, cycle counts, FEFO reservation allocation, and expiry enforcement at shipment.
+- Domain-specific inventory/cost Android screens and two-way sync to these new tables.
+- Cost allocation drivers beyond harvested output quantity, joint-product handling, finalized cost close, and actual realized profitability.
+- Reviewed role-based approval (the current cost approval token is a limited server-side gate, not a substitute for a full maker-checker role model).
+- Iran statutory accounting/tax adapter, current official legal matrix, and independent accountant/tax specialist sign-off.
+- Full concurrency/load, migration compatibility, backup/restore drills, LAN deployment, and physical-phone installation/upgrade.
+
+### Current validation state
+- Source commits are present on the feature branch.
+- CI run results must be checked against the latest branch head before marking automated validation as passed.
+- Emulator tests are not physical Android-device acceptance.
+- No stable release, deployment, legal certification, or production-ready claim is authorized by this progress note.
