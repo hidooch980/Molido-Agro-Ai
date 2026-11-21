@@ -25,8 +25,6 @@ class MainActivityUiTest {
         composeRule.onNodeWithText("ساخت حساب").performScrollTo().performClick()
         composeRule.onNodeWithText("نام کاربری باید ۳ تا ۶۴ نویسه", substring = true).assertIsDisplayed()
     }
-}
-
 
     @Test
     fun crmErpWorkspaceIsAvailableInPersianNavigation() {
@@ -34,3 +32,4 @@ class MainActivityUiTest {
         composeRule.onNodeWithText("مدیریت یکپارچه CRM و ERP").assertIsDisplayed()
         composeRule.onNodeWithText("ذخیره محلی و افزودن به صف همگام‌سازی").assertIsDisplayed()
     }
+}
