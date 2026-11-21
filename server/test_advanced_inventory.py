@@ -468,7 +468,7 @@ def test_harvest_receipt_idempotency_rejects_changed_harvest_or_destination():
     assert changed_harvest.status_code == 409, changed_harvest.text
     changed_lot = client.post("/v2/erp/inventory/harvest-receipts",headers=h,json={**body,"lotCode":"HARVEST-IDEM-CHANGED"})
     assert changed_lot.status_code == 409, changed_lot.text
-    assert client.get("/v2/erp/inventory/balances",headers=h).json()["items"][0]["quantity"] == "10"
+    assert Decimal(client.get("/v2/erp/inventory/balances",headers=h).json()["items"][0]["quantity"]) == Decimal("10")
 
 
 def test_harvest_lot_sales_shipment_and_crop_cost_reconcile_end_to_end():
