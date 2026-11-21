@@ -364,6 +364,12 @@ def test_customer_and_supplier_returns_require_approval_and_keep_ledger_history(
     returned_lot = client.get(f"/v2/erp/inventory/lots/{approved_customer.json()['lotId']}/trace",
                               headers=h).json()["lot"]
     assert returned_lot["qualityState"] == "PENDING_INSPECTION"
+    wrong_supplier_reference = client.post("/v2/erp/inventory/returns",headers=h,json={
+        "idempotencyKey":"supplier-return-wrong-source-001","direction":"SUPPLIER_RETURN",
+        "lotId":received["lotId"],"warehouseId":w,"quantity":"1",
+        "referenceId":"PO-UNRELATED-1","reason":"Wrong supplier source"
+    })
+    assert wrong_supplier_reference.status_code == 409
     supplier = client.post("/v2/erp/inventory/returns", headers=h, json={
         "idempotencyKey":"supplier-return-001","direction":"SUPPLIER_RETURN",
         "lotId":received["lotId"],"warehouseId":w,"quantity":"4",
