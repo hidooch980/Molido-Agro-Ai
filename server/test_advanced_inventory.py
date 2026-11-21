@@ -892,6 +892,31 @@ def test_quality_status_change_requires_separate_human_approval():
         json={"state":"RELEASED","reason":"Inspection passed"})
     assert approved.status_code == 200, approved.text
 
+def test_sales_order_confirmation_rejects_excess_lot_reservations():
+    h = account("salesorderexcessreserve")
+    customer = client.post("/v1/crm/customers",headers=h,json={"name":"Excess Reserve Customer"})
+    p = product(h,"CUC-SALES-EXCESS")
+    w = warehouse(h,"SALES-EXCESS")
+    order = client.post("/v1/erp/sales/orders",headers=h,json={
+        "partyId":customer.json()["id"],"lines":[{"productId":p,"quantity":5,"unitPrice":100}]
+    })
+    assert order.status_code == 200, order.text
+    received = lot(h,p,w,"sales-excess-lot-001","SALES-EXCESS-LOT","10")
+    release(h,received["lotId"])
+    excess = client.post("/v2/erp/inventory/reservations",headers=h,json={
+        "idempotencyKey":"sales-excess-reserve-001","lotId":received["lotId"],
+        "warehouseId":w,"referenceType":"SALES_ORDER","referenceId":order.json()["id"],
+        "quantity":"6"
+    })
+    assert excess.status_code == 200, excess.text
+    confirmed = client.post(f"/v1/erp/orders/{order.json()['id']}/transition",headers=h,
+        json={"action":"CONFIRM","idempotencyKey":"sales-excess-confirm-001"})
+    assert confirmed.status_code == 409, confirmed.text
+    balance_row = next(row for row in client.get("/v2/erp/inventory/balances",headers=h).json()["items"]
+                       if row["lotId"] == received["lotId"])
+    assert Decimal(balance_row["quantity"]) == Decimal("10")
+
+
 def test_sales_order_fulfillment_rejects_partial_inventory_reservations():
     h = account("salesorderpartialreserve")
     customer = client.post("/v1/crm/customers", headers=h, json={"name":"Partial Reserve Customer"})
