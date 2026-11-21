@@ -13,8 +13,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-release-${{ github.ref }}-${{ github.sha }}
-  cancel-in-progress: false
+  # Keep only the newest validation run for a branch/ref; avoid spending runner minutes on stale commits.
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
 
