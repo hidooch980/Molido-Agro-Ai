@@ -7,13 +7,14 @@ An evidence-first quality agent that discovers backend and Android unit-test run
 - Nightly scheduled diagnostics, pull-request diagnostics, and manual runs.
 - On pushes to the dedicated BugHunter branch, Ruff safe autofixes run automatically and are limited to Python files under server/.
 - Every autofix is followed by the Backend pytest suite and Android unit tests; if a check fails, changed Python files are restored from the pre-fix snapshot.
-- A bot commit is created only when all checks pass and the changed-file list contains only server/*.py. Bot commits do not trigger another workflow run.
+- The diagnostic job has read-only repository permission and does not expose a write token to test code. It exports a patch artifact only after all checks pass and only for Ruff-changed server/*.py files.
+- A separate, isolated commit job receives write permission, verifies the report and exact source SHA, applies the patch, rechecks staged paths, and pushes a bot commit only when all gates pass. Bot commits do not trigger another workflow run.
 - Manual workflow runs retain an explicit opt-in input; pull-request diagnostics run against foundation/android-release-foundation.
 - Reports are uploaded as workflow artifacts for 30 days.
 - Failures are classified as dependency, assertion, migration, Android build, service/network, permissions, or unclassified.
 
 ## Safety boundaries
-- The workflow has repository contents write permission only to commit verified Ruff changes on the dedicated feature/bughunter-autofix-agent branch. It does not merge pull requests or write releases.
+- Only the isolated commit job has repository contents write permission, and it can push verified Ruff changes only to the dedicated feature/bughunter-autofix-agent branch. The diagnostic/test job has read-only permission. Neither job can merge pull requests or write releases.
 - No LLM/API key, paid service, VPS, external database, or external runtime.
 - No database/user-data mutation, secrets or signing-key access, tag creation, release, deployment, or merge.
 - No speculative rewriting of business logic. Ambiguous, security-sensitive, financial, migration, agricultural-chemical, and data-integrity issues require human review.
