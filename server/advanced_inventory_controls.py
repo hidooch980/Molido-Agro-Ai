@@ -263,12 +263,33 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         with db() as c:
             schema(c)
             c.execute("BEGIN IMMEDIATE")
-            duplicate = c.execute(
-                "SELECT reservation_id FROM adv_reservations WHERE user_id=? AND idempotency_key=?",
+            previous = c.execute(
+                "SELECT result FROM adv_fefo_allocations WHERE user_id=? AND idempotency_key=?",
                 (user, body.idempotencyKey),
             ).fetchone()
-            if duplicate:
-                return {"status": "duplicate", "reservationIds": [duplicate["reservation_id"]]}
+            if previous:
+                result = json.loads(previous["result"])
+                expected = {
+                    "productId": body.productId,
+                    "warehouseId": body.warehouseId,
+                    "requestedQuantity": format(requested, "f"),
+                    "referenceType": body.referenceType,
+                    "referenceId": body.referenceId,
+                }
+                if any(result.get(key) != value for key, value in expected.items()):
+                    raise HTTPException(409, "Idempotency key already belongs to a different FEFO reservation")
+                result["status"] = "duplicate"
+                return result
+            # Support replay of reservations created before full FEFO request snapshots were stored.
+            legacy = c.execute(
+                """SELECT reservation_id FROM adv_reservations
+                   WHERE user_id=? AND (idempotency_key=? OR
+                     substr(idempotency_key,1,length(?)+1)=?||':')
+                   ORDER BY created_at,reservation_id""",
+                (user, body.idempotencyKey, body.idempotencyKey, body.idempotencyKey),
+            ).fetchall()
+            if legacy:
+                return {"status": "duplicate", "reservationIds": [row["reservation_id"] for row in legacy]}
             if not c.execute("SELECT 1 FROM adv_warehouses WHERE user_id=? AND warehouse_id=? AND active=1",
                              (user, body.warehouseId)).fetchone():
                 raise HTTPException(404, "Warehouse not found in this account")
@@ -308,8 +329,18 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                 created.append({"reservationId":reservation_id,"lotId":row["lot_id"],
                                 "quantity":format(take,"f"),"expiryDate":row["expiry_date"]})
                 remaining -= take
-        return {"status":"reserved","allocationPolicy":"FEFO","referenceId":body.referenceId,
-                "quantity":format(requested,"f"),"allocations":created}
+        result = {
+            "status": "reserved", "allocationPolicy": "FEFO",
+            "productId": body.productId, "warehouseId": body.warehouseId,
+            "requestedQuantity": format(requested, "f"),
+            "referenceType": body.referenceType, "referenceId": body.referenceId,
+            "quantity": format(requested, "f"), "allocations": created,
+        }
+        with db() as c:
+            schema(c)
+            c.execute("INSERT INTO adv_fefo_allocations VALUES(?,?,?,?)",
+                      (user, body.idempotencyKey, json.dumps(result, separators=(",", ":")), now))
+        return result
 
     @app.post("/v2/erp/inventory/returns")
     def create_return(body: ReturnInput, authorization: str | None = Header(default=None)):
