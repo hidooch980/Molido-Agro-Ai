@@ -257,14 +257,29 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
             if action=="CONFIRM":
                 if state!="DRAFT": raise HTTPException(409,"Only draft orders can be confirmed")
                 if order["order_type"]=="SALES":
-                    for line in lines:
-                        warehouse="main"
-                        balance=c.execute("SELECT quantity FROM inventory_balances WHERE user_id=? AND warehouse_id=? AND product_id=?",(user,warehouse,line["productId"])).fetchone()
-                        available=float(balance["quantity"]) if balance else 0.0
-                        reserved=c.execute("SELECT COALESCE(SUM(quantity),0) q FROM order_reservations WHERE user_id=? AND warehouse_id=? AND product_id=? AND state='RESERVED'",(user,warehouse,line["productId"])).fetchone()["q"]
-                        if available-float(reserved)<float(line["quantity"]): raise HTTPException(409,"Insufficient available stock to reserve order")
-                    for line in lines:
-                        c.execute("INSERT INTO order_reservations VALUES(?,?,?,?,?,?,?)",(user,order_id,"main",line["productId"],line["quantity"],"RESERVED",now))
+                    advanced_table=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='adv_reservations'").fetchone()
+                    advanced_rows=[]
+                    if advanced_table:
+                        advanced_rows=c.execute("SELECT product_id,quantity FROM adv_reservations r JOIN adv_lots l ON l.user_id=r.user_id AND l.lot_id=r.lot_id WHERE r.user_id=? AND r.reference_type='SALES_ORDER' AND r.reference_id=? AND r.state='ACTIVE'",(user,order_id)).fetchall()
+                    if advanced_rows:
+                        from decimal import Decimal
+                        required_by_product={}
+                        for line in lines:
+                            product_id=line["productId"]
+                            required_by_product[product_id]=required_by_product.get(product_id,Decimal("0"))+Decimal(str(line["quantity"]))
+                        for product_id,required_qty in required_by_product.items():
+                            reserved_qty=sum((Decimal(r["quantity"]) for r in advanced_rows if r["product_id"]==product_id),Decimal("0"))
+                            if reserved_qty < required_qty:
+                                raise HTTPException(409,"Advanced lot reservations do not cover every sales order line")
+                    else:
+                        for line in lines:
+                            warehouse="main"
+                            balance=c.execute("SELECT quantity FROM inventory_balances WHERE user_id=? AND warehouse_id=? AND product_id=?",(user,warehouse,line["productId"])).fetchone()
+                            available=float(balance["quantity"]) if balance else 0.0
+                            reserved=c.execute("SELECT COALESCE(SUM(quantity),0) q FROM order_reservations WHERE user_id=? AND warehouse_id=? AND product_id=? AND state='RESERVED'",(user,warehouse,line["productId"])).fetchone()["q"]
+                            if available-float(reserved)<float(line["quantity"]): raise HTTPException(409,"Insufficient available stock to reserve order")
+                        for line in lines:
+                            c.execute("INSERT INTO order_reservations VALUES(?,?,?,?,?,?,?)",(user,order_id,"main",line["productId"],line["quantity"],"RESERVED",now))
                 state="CONFIRMED"
             elif action=="CANCEL":
                 if state not in ("DRAFT","CONFIRMED"): raise HTTPException(409,"Order cannot be cancelled in this state")
@@ -274,10 +289,15 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
                 state="SHIPPED"
             elif action=="DELIVER":
                 if order["order_type"]!="SALES" or state!="SHIPPED": raise HTTPException(409,"Sales order must be shipped before delivery")
-                for line in lines:
-                    c.execute("UPDATE inventory_balances SET quantity=quantity-?,updated_at=? WHERE user_id=? AND warehouse_id='main' AND product_id=? AND quantity>=?",(line["quantity"],now,user,line["productId"],line["quantity"]))
-                    if c.execute("SELECT changes()").fetchone()[0]!=1: raise HTTPException(409,"Stock changed; delivery rejected")
-                    c.execute("UPDATE order_reservations SET state='CONSUMED' WHERE user_id=? AND order_id=? AND product_id=? AND state='RESERVED'",(user,order_id,line["productId"]))
+                advanced_shipments=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='adv_stock_movements'").fetchone()
+                has_advanced_issue=False
+                if advanced_shipments:
+                    has_advanced_issue=c.execute("SELECT 1 FROM adv_stock_movements WHERE user_id=? AND reference_type='SALES_ORDER' AND reference_id=? AND movement_type='SHIPMENT_ISSUE' LIMIT 1",(user,order_id)).fetchone() is not None
+                if not has_advanced_issue:
+                    for line in lines:
+                        c.execute("UPDATE inventory_balances SET quantity=quantity-?,updated_at=? WHERE user_id=? AND warehouse_id='main' AND product_id=? AND quantity>=?",(line["quantity"],now,user,line["productId"],line["quantity"]))
+                        if c.execute("SELECT changes()").fetchone()[0]!=1: raise HTTPException(409,"Stock changed; delivery rejected")
+                        c.execute("UPDATE order_reservations SET state='CONSUMED' WHERE user_id=? AND order_id=? AND product_id=? AND state='RESERVED'",(user,order_id,line["productId"]))
                 state="DELIVERED"
                 _post_order_journal(c,user,order_id,order["total"],"SALES",now,encrypt_payload)
             elif action=="FULFILL":
