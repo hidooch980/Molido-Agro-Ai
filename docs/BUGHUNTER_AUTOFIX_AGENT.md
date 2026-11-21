@@ -4,7 +4,7 @@
 An evidence-first quality agent that discovers backend and Android unit-test runners, executes them with bounded timeouts, classifies common failure signatures, and emits JSON plus Markdown reports.
 
 ## Automation
-- Nightly scheduled diagnostics, pull-request diagnostics, and manual runs.
+- Push, pull-request, and manual diagnostics are active on this feature branch. A nightly schedule is configured, but GitHub only runs scheduled workflows from the repository default branch; it will become active only if the workflow is later integrated there.
 - On pushes to the dedicated BugHunter branch, Ruff safe autofixes run automatically and are limited to Python files under server/.
 - Every autofix is followed by the Backend pytest suite and Android unit tests; if a check fails, changed Python files are restored from the pre-fix snapshot.
 - The diagnostic job has read-only repository permission and does not expose a write token to test code. It exports a patch artifact only after all checks pass and only for Ruff-changed server/*.py files.
