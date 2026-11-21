@@ -60,6 +60,21 @@ def release(headers, lot_id):
     assert response.status_code == 200, response.text
 
 
+def test_registered_api_routes_have_no_method_path_collisions():
+    seen = {}
+    duplicates = []
+    for route in app_module.app.routes:
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", set()) or set()
+        for method in methods:
+            key = (method, path)
+            if key in seen:
+                duplicates.append((key, seen[key], route.endpoint.__name__))
+            else:
+                seen[key] = route.endpoint.__name__
+    assert duplicates == []
+
+
 def test_fefo_reservation_endpoints_are_distinct_and_registered_once():
     expected = {
         "/v2/erp/inventory/fefo/reservations": "reserve_fefo",
