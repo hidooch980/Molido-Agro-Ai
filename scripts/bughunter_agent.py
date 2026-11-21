@@ -42,8 +42,10 @@ def rollback_safe_fixes(snapshot: dict[str, bytes], changed_files: list[str]) ->
   if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'server' or path.suffix != '.py':
    continue
   original = snapshot.get(path.as_posix())
-  if original is not None and (ROOT / path).is_file() and (ROOT / path).read_bytes() != original:
-   (ROOT / path).write_bytes(original)
+  target = ROOT / path
+  if original is not None and (not target.is_file() or target.read_bytes() != original):
+   target.parent.mkdir(parents=True, exist_ok=True)
+   target.write_bytes(original)
    restored.append(path.as_posix())
  return sorted(restored)
 def safe_fixes(enabled: bool) -> dict:
@@ -77,7 +79,14 @@ def main() -> int:
  if fixes.get('enabled') and fixes.get('changed_files') and (passed != len(checks) or fixes.get('status') != 'completed' or drift):
   rollback_targets = sorted(set(fixes['changed_files']) | set(drift))
   fixes['rollback_files'] = rollback_safe_fixes(_SAFE_FIX_SNAPSHOT, rollback_targets)
-  fixes['status'] = 'rolled_back' if fixes['rollback_files'] else 'needs_review'
+  unresolved = []
+  for name in rollback_targets:
+   original = _SAFE_FIX_SNAPSHOT.get(name)
+   target = ROOT / name
+   if original is not None and (not target.is_file() or target.read_bytes() != original):
+    unresolved.append(name)
+  fixes['rollback_unresolved_files'] = unresolved
+  fixes['status'] = 'rolled_back' if not unresolved else 'needs_review'
   fixes['changed_files'] = []
   if drift: fixes['test_side_effects_detected'] = drift
  if fixes.get('status') == 'completed' and fixes.get('changed_files') and passed == len(checks):
