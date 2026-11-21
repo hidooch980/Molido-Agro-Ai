@@ -68,7 +68,7 @@ def main() -> int:
  elif shutil.which('gradle') and (ROOT/'app').is_dir(): checks.append(run_check('android_unit_tests',['gradle','--no-daemon',':app:testDebugUnitTest'],args.timeout))
  if not checks: checks.append(Check('discovery',[],'not_run',None,0.0,['no_test_runner'],'No supported test runner found.'))
  passed=sum(c.status=='passed' for c in checks); failed=sum(c.status in ('failed','timed_out') for c in checks)
- if fixes.get('enabled') and fixes.get('changed_files') and (failed or fixes.get('status') != 'completed'):
+ if fixes.get('enabled') and fixes.get('changed_files') and (passed != len(checks) or fixes.get('status') != 'completed'):
   fixes['rollback_files'] = rollback_safe_fixes(_SAFE_FIX_SNAPSHOT, fixes['changed_files'])
   fixes['status'] = 'rolled_back' if fixes['rollback_files'] else 'needs_review'
   fixes['changed_files'] = []
