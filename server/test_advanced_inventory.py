@@ -524,3 +524,60 @@ def test_fefo_concurrent_allocations_never_reserve_more_than_available_stock():
     trace = client.get(f"/v2/erp/inventory/lots/{received['lotId']}/trace", headers=h).json()
     active = sum(Decimal(row["quantity"]) for row in trace["reservations"] if row["state"] == "ACTIVE")
     assert active == Decimal("10")
+
+
+def test_reservation_idempotency_keys_cannot_be_reused_for_different_requests_or_actions():
+    h = account("reservationkeycollision")
+    p = product(h, "CUC-RES-KEY")
+    w = warehouse(h, "RES-KEY")
+    received = lot(h, p, w, key="lot-res-key-001", code="LOT-RES-KEY", quantity="12")
+    release(h, received["lotId"])
+
+    request = {
+        "idempotencyKey": "reserve-key-collision-01",
+        "lotId": received["lotId"],
+        "warehouseId": w,
+        "referenceType": "SALES_ORDER",
+        "referenceId": "SO-KEY-1",
+        "quantity": "4",
+    }
+    reserved = client.post("/v2/erp/inventory/reservations", headers=h, json=request)
+    assert reserved.status_code == 200, reserved.text
+    duplicate = client.post("/v2/erp/inventory/reservations", headers=h, json=request)
+    assert duplicate.status_code == 200
+    assert duplicate.json()["reservationId"] == reserved.json()["reservationId"]
+
+    changed_request = client.post(
+        "/v2/erp/inventory/reservations",
+        headers=h,
+        json={**request, "quantity": "5"},
+    )
+    assert changed_request.status_code == 409
+
+    reservation_id = reserved.json()["reservationId"]
+    released = client.post(
+        f"/v2/erp/inventory/reservations/{reservation_id}/actions",
+        headers=h,
+        json={"idempotencyKey": "reservation-action-key-01", "action": "RELEASE"},
+    )
+    assert released.status_code == 200, released.text
+
+    changed_action = client.post(
+        f"/v2/erp/inventory/reservations/{reservation_id}/actions",
+        headers=h,
+        json={"idempotencyKey": "reservation-action-key-01", "action": "FULFILL"},
+    )
+    assert changed_action.status_code == 409
+
+    second = client.post(
+        "/v2/erp/inventory/reservations",
+        headers=h,
+        json={**request, "idempotencyKey": "reserve-key-collision-02", "referenceId": "SO-KEY-2"},
+    )
+    assert second.status_code == 200, second.text
+    reused_for_other_reservation = client.post(
+        f"/v2/erp/inventory/reservations/{second.json()['reservationId']}/actions",
+        headers=h,
+        json={"idempotencyKey": "reservation-action-key-01", "action": "RELEASE"},
+    )
+    assert reused_for_other_reservation.status_code == 409
