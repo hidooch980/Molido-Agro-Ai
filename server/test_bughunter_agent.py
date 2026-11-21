@@ -43,3 +43,12 @@ def test_safe_autofix_rollback_restores_deleted_server_file(tmp_path, monkeypatc
  restored = AGENT.rollback_safe_fixes({'server/deleted.py': b'value = 7\\n'}, ['server/deleted.py'])
  assert restored == ['server/deleted.py']
  assert target.read_bytes() == b'value = 7\\n'
+
+def test_safe_autofix_rollback_removes_new_server_file(tmp_path, monkeypatch):
+ target = tmp_path / 'server' / 'created.py'
+ target.parent.mkdir()
+ target.write_bytes(b'created = True\\n')
+ monkeypatch.setattr(AGENT, 'ROOT', tmp_path)
+ restored = AGENT.rollback_safe_fixes({}, ['server/created.py'])
+ assert restored == ['server/created.py']
+ assert not target.exists()
