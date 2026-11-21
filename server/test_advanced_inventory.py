@@ -10,9 +10,10 @@ os.environ["MOLIDO_DATA_KEY"] = base64.urlsafe_b64encode(b"abcdefghijklmnopqrstu
 os.environ["MOLIDO_DB_PATH"] = str(DB)
 
 from fastapi.testclient import TestClient
-from app import app
+import app as app_module
+app_module.DB_PATH = DB
 
-client = TestClient(app)
+client = TestClient(app_module.app)
 
 
 def account(name):
