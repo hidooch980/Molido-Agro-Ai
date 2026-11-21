@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
 import time
 import uuid
 from decimal import Decimal, InvalidOperation
@@ -53,6 +55,7 @@ def register_production_costing_routes(app, db, current_user, decrypt_payload) -
           amount TEXT NOT NULL, currency TEXT NOT NULL, quantity TEXT, unit TEXT,
           allocation_method TEXT NOT NULL, source_reference TEXT NOT NULL,
           notes TEXT NOT NULL, actor_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+          approval_status TEXT NOT NULL DEFAULT 'PENDING_APPROVAL', approved_by TEXT, approved_at INTEGER,
           UNIQUE(user_id,idempotency_key)
         );
         CREATE INDEX IF NOT EXISTS idx_crop_cost_cycle ON crop_cost_entries(user_id,crop_cycle_id,created_at);
@@ -99,11 +102,30 @@ def register_production_costing_routes(app, db, current_user, decrypt_payload) -
             duplicate=c.execute("SELECT entry_id FROM crop_cost_entries WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
             if duplicate: return {"status":"duplicate","entryId":duplicate["entry_id"]}
             ensure_cycle(c,user,body.greenhouseId,body.cropCycleId)
-            c.execute("""INSERT INTO crop_cost_entries VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            c.execute("""INSERT INTO crop_cost_entries(
+              entry_id,user_id,idempotency_key,greenhouse_id,crop_cycle_id,category,amount,currency,
+              quantity,unit,allocation_method,source_reference,notes,actor_id,created_at,approval_status)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'PENDING_APPROVAL')""",
               (ident,user,body.idempotencyKey,body.greenhouseId,body.cropCycleId,body.category,
                format(body.amount,"f"),body.currency,format(body.quantity,"f") if body.quantity is not None else None,
                body.unit,body.allocationMethod,body.sourceReference,body.notes,user,now))
-        return {"status":"recorded","entryId":ident,"amount":format(body.amount,"f"),"currency":body.currency}
+        return {"status":"pending_approval","entryId":ident,"amount":format(body.amount,"f"),"currency":body.currency}
+
+    @app.post("/v2/erp/costs/entries/{entry_id}/approve")
+    def approve_cost_entry(entry_id: str, x_approval_token: str | None = Header(default=None), authorization: str | None = Header(default=None)):
+        user=actor(authorization)
+        expected=os.environ.get("MOLIDO_COST_APPROVAL_TOKEN","")
+        if len(expected)<32 or not x_approval_token or not secrets.compare_digest(expected,x_approval_token):
+            raise HTTPException(403,"Cost approval is not configured or token is invalid")
+        now=int(time.time()*1000)
+        with db() as c:
+            schema(c); c.execute("BEGIN IMMEDIATE")
+            row=c.execute("SELECT approval_status FROM crop_cost_entries WHERE user_id=? AND entry_id=?",(user,entry_id)).fetchone()
+            if not row: raise HTTPException(404,"Cost entry not found in this account")
+            if row["approval_status"]=="APPROVED": return {"status":"already_approved","entryId":entry_id}
+            c.execute("UPDATE crop_cost_entries SET approval_status='APPROVED',approved_by=?,approved_at=? WHERE user_id=? AND entry_id=?",
+              (user,now,user,entry_id))
+        return {"status":"approved","entryId":entry_id,"approvedAtEpochMillis":now}
 
     @app.get("/v2/erp/costs/cycles/{crop_cycle_id}/entries")
     def list_cost_entries(crop_cycle_id: str, authorization: str | None = Header(default=None)):
@@ -114,7 +136,7 @@ def register_production_costing_routes(app, db, current_user, decrypt_payload) -
         return {"items":[{"id":r["entry_id"],"greenhouseId":r["greenhouse_id"],"cropCycleId":r["crop_cycle_id"],
           "category":r["category"],"amount":r["amount"],"currency":r["currency"],"quantity":r["quantity"],
           "unit":r["unit"],"allocationMethod":r["allocation_method"],"sourceReference":r["source_reference"],
-          "notes":r["notes"],"createdAtEpochMillis":r["created_at"]} for r in rows]}
+          "notes":r["notes"],"approvalStatus":r["approval_status"],"createdAtEpochMillis":r["created_at"]} for r in rows]}
 
     @app.post("/v2/erp/costs/runs")
     def run_costing(body: CostRunInput, authorization: str | None = Header(default=None)):
@@ -124,7 +146,7 @@ def register_production_costing_routes(app, db, current_user, decrypt_payload) -
             duplicate=c.execute("SELECT run_id,version FROM crop_cost_runs WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
             if duplicate: return {"status":"duplicate","runId":duplicate["run_id"],"version":duplicate["version"]}
             ensure_cycle(c,user,body.greenhouseId,body.cropCycleId)
-            entries=c.execute("SELECT category,amount,currency,allocation_method FROM crop_cost_entries WHERE user_id=? AND greenhouse_id=? AND crop_cycle_id=?",
+            entries=c.execute("SELECT category,amount,currency,allocation_method FROM crop_cost_entries WHERE user_id=? AND greenhouse_id=? AND crop_cycle_id=? AND approval_status='APPROVED'",
               (user,body.greenhouseId,body.cropCycleId)).fetchall()
             if not entries: raise HTTPException(409,"No approved cost entries exist for this crop cycle")
             currencies={r["currency"] for r in entries}
