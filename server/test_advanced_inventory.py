@@ -667,3 +667,33 @@ def test_inventory_lot_rejects_invalid_calendar_dates():
         "receivedDate":"2026-02-30","expiryDate":"2026-12-20"
     })
     assert response.status_code == 422
+
+def test_lot_receipt_idempotency_rejects_changed_payload():
+    h = account("lot-receipt-key")
+    p = product(h, "CUC-LOT-REPLAY")
+    w = warehouse(h, "LOT-REPLAY")
+    body = {"idempotencyKey":"lot-receipt-replay-001","warehouseId":w,"productId":p,
+            "lotCode":"LOT-REPLAY-001","quantity":"5","unit":"kg",
+            "receivedDate":"2026-11-20","expiryDate":"2026-12-20","sourceType":"SUPPLIER"}
+    first = client.post("/v2/erp/inventory/lots", headers=h, json=body)
+    assert first.status_code == 200, first.text
+    same = client.post("/v2/erp/inventory/lots", headers=h, json=body)
+    assert same.status_code == 200 and same.json()["status"] == "duplicate"
+    changed = client.post("/v2/erp/inventory/lots", headers=h, json={**body,"quantity":"6"})
+    assert changed.status_code == 409
+
+
+def test_fefo_allocation_idempotency_rejects_changed_request():
+    h = account("fefo-replay-payload")
+    p = product(h, "CUC-FEFO-REPLAY")
+    w = warehouse(h, "FEFO-REPLAY")
+    received = lot(h, p, w, key="fefo-replay-lot-001", code="FEFO-REPLAY-LOT", quantity="10")
+    release(h, received["lotId"])
+    body = {"idempotencyKey":"fefo-replay-key-001","warehouseId":w,"productId":p,
+            "referenceType":"SALES_ORDER","referenceId":"SO-FEFO-REPLAY","quantity":"4"}
+    first = client.post("/v2/erp/inventory/fefo/allocate", headers=h, json=body)
+    assert first.status_code == 200, first.text
+    same = client.post("/v2/erp/inventory/fefo/allocate", headers=h, json=body)
+    assert same.status_code == 200 and same.json()["status"] == "duplicate"
+    changed = client.post("/v2/erp/inventory/fefo/allocate", headers=h, json={**body,"quantity":"5"})
+    assert changed.status_code == 409
