@@ -265,6 +265,34 @@ def test_fefo_reserves_earliest_expiry_across_multiple_lots_and_is_idempotent():
     assert duplicate.status_code == 200 and duplicate.json()["status"] == "duplicate"
 
 
+def test_fefo_reservation_replay_binds_payload_and_returns_all_lot_allocations():
+    h = account("feforeservationkey")
+    p = product(h,"CUC-FEFO-RES-KEY")
+    w = warehouse(h,"FEFO-RES-KEY")
+    def receive(code, expiry, quantity):
+        response = client.post("/v2/erp/inventory/lots",headers=h,json={
+            "idempotencyKey":"fefo-res-key-"+code,"warehouseId":w,"productId":p,
+            "lotCode":code,"quantity":quantity,"unit":"kg",
+            "receivedDate":"2026-11-20","expiryDate":expiry,"sourceType":"SUPPLIER"
+        })
+        assert response.status_code == 200, response.text
+        release(h,response.json()["lotId"])
+    receive("FEFO-RES-LATE","2027-02-01","8")
+    receive("FEFO-RES-EARLY","2026-12-01","5")
+    body = {"idempotencyKey":"fefo-reservation-key-01","productId":p,"warehouseId":w,
+            "quantity":"10","referenceType":"SALES_ORDER","referenceId":"SO-FEFO-KEY"}
+    first = client.post("/v2/erp/inventory/fefo/reservations",headers=h,json=body)
+    assert first.status_code == 200, first.text
+    assert len(first.json()["allocations"]) == 2
+    duplicate = client.post("/v2/erp/inventory/fefo/reservations",headers=h,json=body)
+    assert duplicate.status_code == 200 and duplicate.json()["status"] == "duplicate"
+    assert duplicate.json()["allocations"] == first.json()["allocations"]
+    changed = client.post("/v2/erp/inventory/fefo/reservations",headers=h,json={**body,"quantity":"11"})
+    assert changed.status_code == 409, changed.text
+    balances = client.get("/v2/erp/inventory/balances",headers=h).json()["items"]
+    assert sum(Decimal(row["quantity"]) for row in balances) == Decimal("13")
+
+
 def test_customer_and_supplier_returns_require_approval_and_keep_ledger_history():
     h = account("returnflows")
     p = product(h, "CUC-RETURN-01")
