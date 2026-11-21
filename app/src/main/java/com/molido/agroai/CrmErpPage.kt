@@ -187,7 +187,7 @@ fun CrmErpPage(accountId: String?, legacyRecords: List<com.molido.agroai.data.Bu
                     Button(onClick = {
                         val q = quantity.toDoubleOrNull()
                         if (greenhouseId.isBlank() || cropCycleId.isBlank() || productId.isBlank() || q == null || q <= 0) onNotice("شناسه گلخانه، دوره کشت، محصول و مقدار برداشت را بررسی کنید.")
-                        else persist("harvest", JSONObject().put("greenhouseId", greenhouseId.trim()).put("cropCycleId", cropCycleId.trim()).put("productId", productId.trim()).put("warehouseId", "main").put("quantity", q).put("unit", unit))
+                        else persist("harvest_batch", JSONObject().put("greenhouseId", greenhouseId.trim()).put("cropCycleId", cropCycleId.trim()).put("productId", productId.trim()).put("warehouseId", "main").put("quantity", q).put("unit", unit))
                     }, modifier = Modifier.fillMaxWidth()) { Text("ثبت برداشت محلی") }
                 }
                 "SALES_ORDER" -> {
@@ -208,7 +208,7 @@ fun CrmErpPage(accountId: String?, legacyRecords: List<com.molido.agroai.data.Bu
                 val data = runCatching { JSONObject(SyncPayloadCipher.decrypt(record.encryptedPayload)) }.getOrNull()
                 Card(shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(businessKinds.firstOrNull { it.first == record.entityType.uppercase() }?.second ?: record.entityType, fontWeight = FontWeight.SemiBold)
+                        Text(businessKinds.firstOrNull { it.first == record.entityType.uppercase() }?.second ?: when (record.entityType) { "harvest_batch" -> "برداشت"; "support_ticket" -> "درخواست پشتیبانی"; else -> record.entityType }, fontWeight = FontWeight.SemiBold)
                         Text(data?.optString("name").takeUnless { it.isNullOrBlank() } ?: data?.optString("title").takeUnless { it.isNullOrBlank() } ?: data?.optString("subject").takeUnless { it.isNullOrBlank() } ?: record.entityId)
                         Text("شناسه: " + record.entityId, style = MaterialTheme.typography.labelSmall)
                         Text("وضعیت همگام‌سازی: " + when (record.syncState) { "SYNCED" -> "ارسال‌شده"; "CONFLICT" -> "نیازمند بررسی تعارض"; "LOCAL_ONLY" -> "فقط روی این دستگاه"; else -> "در صف ارسال" }, style = MaterialTheme.typography.labelSmall)
