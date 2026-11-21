@@ -80,7 +80,7 @@ jobs:
               path = PurePosixPath(name)
               if path.is_absolute() or ".." in path.parts or not path.parts or path.parts[0] != "server" or path.suffix != ".py":
                   raise SystemExit("Refusing to stage an out-of-scope path: " + name)
-          print("\\n".join(sorted(set(files))))
+          print("\n".join(sorted(set(files))))
           PY
           )
           if (( ${#changed_files[@]} > 0 )); then
