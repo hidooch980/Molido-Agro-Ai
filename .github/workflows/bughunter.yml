@@ -119,4 +119,4 @@ jobs:
             git commit -m 'chore(bughunter): apply tested safe Python fixes [skip ci]'
             git push origin HEAD:feature/bughunter-autofix-agent
           fi
-        fi
+          fi
