@@ -4,7 +4,6 @@ import hmac
 import os
 import time
 import uuid
-from typing import Literal
 
 from fastapi import Header, HTTPException
 from pydantic import BaseModel, Field

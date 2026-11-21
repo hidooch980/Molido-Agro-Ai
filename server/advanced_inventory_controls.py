@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Literal
 
 from fastapi import Header, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class FefoReserveInput(BaseModel):
