@@ -255,8 +255,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         if any(stored.get(key) != value for key, value in expected.items()):
             raise HTTPException(409, f"Idempotency key already belongs to a different {label} request")
 
-    # The canonical FEFO reservation endpoint is registered by advanced_inventory.py.
-    # Keep this legacy implementation unregistered to avoid duplicate FastAPI routes.
+    @app.post("/v2/erp/inventory/fefo/reservations")
     def reserve_fefo(body: FefoReserveInput, authorization: str | None = Header(default=None)):
         user = actor(authorization)
         now = int(time.time() * 1000)
