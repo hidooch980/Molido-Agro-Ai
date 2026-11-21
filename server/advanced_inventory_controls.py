@@ -77,6 +77,14 @@ class PurchaseReceiptInput(BaseModel):
     lines: list[PurchaseReceiptLine] = Field(min_length=1, max_length=200)
 
 
+class HarvestLotInput(BaseModel):
+    idempotencyKey: str = Field(min_length=8, max_length=200)
+    harvestId: str = Field(min_length=1, max_length=200)
+    warehouseId: str = Field(min_length=1, max_length=200)
+    lotCode: str = Field(min_length=1, max_length=100)
+    expiryDate: str | None = None
+
+
 def register_advanced_inventory_control_routes(app, db, current_user, decrypt_payload) -> None:
     def schema(c):
         c.executescript("""
@@ -555,3 +563,91 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
               (user,document_id,"PURCHASE_RECEIPT",body.idempotencyKey,"POSTED",
                json.dumps({"orderId":order_id,"receipts":receipts},separators=(",",":")),now,now))
         return {"status":"received_pending_inspection","orderId":order_id,"documentId":document_id,"receipts":receipts}
+
+
+    @app.post("/v2/erp/inventory/harvest-receipts")
+    def receive_harvest_lot(body: HarvestLotInput, authorization: str | None = Header(default=None)):
+        user=actor(authorization); now=int(time.time()*1000)
+        with db() as c:
+            schema(c); c.execute("BEGIN IMMEDIATE")
+            duplicate=c.execute("SELECT movement_id FROM adv_stock_movements WHERE user_id=? AND idempotency_key=?",
+                                (user,body.idempotencyKey)).fetchone()
+            if duplicate: return {"status":"duplicate","movementId":duplicate["movement_id"]}
+            if not c.execute("SELECT 1 FROM adv_warehouses WHERE user_id=? AND warehouse_id=? AND active=1",
+                             (user,body.warehouseId)).fetchone():
+                raise HTTPException(404,"Warehouse not found in this account")
+            harvest=c.execute("""SELECT greenhouse_id,crop_cycle_id,product_id,quantity,payload
+              FROM greenhouse_harvests WHERE user_id=? AND harvest_id=?""",(user,body.harvestId)).fetchone()
+            if not harvest: raise HTTPException(404,"Harvest record not found in this account")
+            existing=c.execute("SELECT lot_id FROM adv_lots WHERE user_id=? AND source_type='GREENHOUSE' AND source_id=?",
+                               (user,body.harvestId)).fetchone()
+            if existing: raise HTTPException(409,"Harvest already has an advanced inventory lot")
+            harvest_payload=decrypt_payload(harvest["payload"])
+            unit=harvest_payload.get("unit","kg")
+            lot_id=uuid.uuid4().hex
+            c.execute("INSERT INTO adv_lots VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              (user,lot_id,harvest["product_id"],body.lotCode,unit,None,
+               time.strftime("%Y-%m-%d",time.gmtime()),time.strftime("%Y-%m-%d",time.gmtime()),
+               body.expiryDate,"GREENHOUSE",body.harvestId,"PENDING_INSPECTION",now))
+            q=amount(harvest["quantity"])
+            write_balance(c,user,body.warehouseId,lot_id,q,now)
+            move=movement(c,user,body.idempotencyKey,"HARVEST_RECEIPT",lot_id,harvest["product_id"],
+                          body.warehouseId,q,"HARVEST",body.harvestId,now)
+        return {"status":"received_pending_inspection","lotId":lot_id,"movementId":move,
+                "quantity":format(q,"f"),"unit":unit,"greenhouseId":harvest["greenhouse_id"],
+                "cropCycleId":harvest["crop_cycle_id"]}
+
+    @app.get("/v2/erp/inventory/orders/{order_id}/cost-reconciliation")
+    def order_cost_reconciliation(order_id: str, authorization: str | None = Header(default=None)):
+        user=actor(authorization)
+        with db() as c:
+            order=c.execute("SELECT order_type,status,total,payload FROM business_orders WHERE user_id=? AND order_id=?",
+                            (user,order_id)).fetchone()
+            if not order: raise HTTPException(404,"Order not found in this account")
+            if order["order_type"]!="SALES": raise HTTPException(409,"Cost reconciliation is only available for sales orders")
+            payload=decrypt_payload(order["payload"])
+            shipped=c.execute("""SELECT movement_id,lot_id,quantity,created_at FROM adv_stock_movements
+              WHERE user_id=? AND movement_type='SHIPMENT_ISSUE'
+                AND reference_type='SALES_ORDER' AND reference_id=? ORDER BY created_at,movement_id""",
+              (user,order_id)).fetchall()
+            returns=c.execute("""SELECT COALESCE(SUM(CAST(quantity AS NUMERIC)),0) quantity
+              FROM adv_stock_movements WHERE user_id=? AND movement_type='CUSTOMER_RETURN'
+                AND reference_type='SALES_RETURN' AND reference_id=?""",(user,order_id)).fetchone()["quantity"]
+            cost_rows=[]; total_cogs=Decimal("0"); currencies=set(); missing=[]
+            for item in shipped:
+                lot=c.execute("SELECT source_type,source_id,unit,product_id FROM adv_lots WHERE user_id=? AND lot_id=?",
+                              (user,item["lot_id"])).fetchone()
+                if not lot or lot["source_type"]!="GREENHOUSE" or not lot["source_id"]:
+                    missing.append({"lotId":item["lot_id"],"reason":"LOT_NOT_LINKED_TO_HARVEST_COST_OBJECT"})
+                    continue
+                allocation=c.execute("""SELECT a.cost_per_unit,a.unit,r.currency,r.version
+                  FROM crop_cost_allocations a JOIN crop_cost_runs r
+                    ON r.user_id=a.user_id AND r.run_id=a.run_id
+                  WHERE a.user_id=? AND a.harvest_id=?
+                  ORDER BY r.version DESC LIMIT 1""",(user,lot["source_id"])).fetchone()
+                if not allocation:
+                    missing.append({"lotId":item["lot_id"],"harvestId":lot["source_id"],"reason":"APPROVED_COST_RUN_REQUIRED"})
+                    continue
+                if allocation["unit"]!=lot["unit"]:
+                    missing.append({"lotId":item["lot_id"],"reason":"UNIT_MISMATCH"})
+                    continue
+                q=Decimal(item["quantity"]); unit_cost=Decimal(allocation["cost_per_unit"])
+                line_cost=q*unit_cost; total_cogs+=line_cost; currencies.add(allocation["currency"])
+                cost_rows.append({"movementId":item["movement_id"],"lotId":item["lot_id"],
+                                  "harvestId":lot["source_id"],"quantity":item["quantity"],
+                                  "unitCost":format(unit_cost,"f"),"cogs":format(line_cost,"f"),
+                                  "currency":allocation["currency"],"costRunVersion":allocation["version"]})
+            if len(currencies)>1:
+                raise HTTPException(409,"Mixed currencies require an approved conversion policy")
+            order_lines=payload.get("lines",[])
+            ordered_quantity=sum((Decimal(str(line["quantity"])) for line in order_lines),Decimal("0"))
+            shipped_quantity=sum((Decimal(item["quantity"]) for item in shipped),Decimal("0"))
+            currency=next(iter(currencies)) if currencies else None
+            complete=bool(shipped) and not missing and shipped_quantity==ordered_quantity and Decimal(str(returns))==0
+            status="PROVISIONAL_COGS" if complete else "NOT_FINALIZED_INCOMPLETE_COST_OR_SHIPMENT_OR_RETURNS"
+        return {"orderId":order_id,"orderStatus":order["status"],"orderValue":str(order["total"]),
+                "orderedQuantity":format(ordered_quantity,"f"),"shippedQuantity":format(shipped_quantity,"f"),
+                "customerReturnQuantityPendingDisposition":str(returns),"cogs":format(total_cogs,"f"),
+                "costCurrency":currency,"costedShipments":cost_rows,"missingCostLinks":missing,
+                "profitabilityStatus":status,
+                "grossMarginBeforeOtherAdjustments":format(Decimal(str(order["total"]))-total_cogs,"f") if complete else None}
