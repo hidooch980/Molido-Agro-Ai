@@ -368,8 +368,8 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                              (user,body.warehouseId)).fetchone():
                 raise HTTPException(404,"Warehouse not found in this account")
             if body.direction == "SUPPLIER_RETURN":
-                if lot["source_type"] != "SUPPLIER":
-                    raise HTTPException(409,"Supplier return is only valid for supplier-sourced lots")
+                if lot["source_type"] != "SUPPLIER" or lot["source_id"] != body.referenceId:
+                    raise HTTPException(409,"Supplier return must reference the original supplier source for this lot")
                 if lot["source_id"] and body.referenceId != lot["source_id"]:
                     raise HTTPException(409,"Supplier return must reference the purchase order that created the lot")
                 on_hand = balance(c,user,body.warehouseId,body.lotId)
