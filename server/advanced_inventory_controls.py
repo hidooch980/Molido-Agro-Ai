@@ -370,6 +370,8 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
             if body.direction == "SUPPLIER_RETURN":
                 if lot["source_type"] != "SUPPLIER":
                     raise HTTPException(409,"Supplier return is only valid for supplier-sourced lots")
+                if lot["source_id"] and body.referenceId != lot["source_id"]:
+                    raise HTTPException(409,"Supplier return must reference the purchase order that created the lot")
                 on_hand = balance(c,user,body.warehouseId,body.lotId)
                 if on_hand - reserved(c,user,body.warehouseId,body.lotId) < requested:
                     raise HTTPException(409,"Supplier return exceeds unreserved stock")
@@ -833,11 +835,19 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
             for line in order_payload.get("lines",[]):
                 expected[line["productId"]]=expected.get(line["productId"],Decimal("0"))+amount(line["quantity"])
             supplied={}
+            seen_lot_codes=set()
             for line in body.lines:
                 supplied[line.productId]=supplied.get(line.productId,Decimal("0"))+amount(line.quantity)
                 if not c.execute("SELECT 1 FROM business_products WHERE user_id=? AND product_id=?",
                                  (user,line.productId)).fetchone():
                     raise HTTPException(404,"Purchase order product not found in this account")
+                lot_key=(line.productId,line.lotCode)
+                if lot_key in seen_lot_codes:
+                    raise HTTPException(409,"Purchase receipt contains a duplicate lot code for the same product")
+                seen_lot_codes.add(lot_key)
+                if c.execute("SELECT 1 FROM adv_lots WHERE user_id=? AND product_id=? AND lot_code=?",
+                             (user,line.productId,line.lotCode)).fetchone():
+                    raise HTTPException(409,"Lot code already exists for this product")
                 if line.expiryDate and line.receivedDate and line.expiryDate<line.receivedDate:
                     raise HTTPException(422,"Expiry date cannot precede receipt date")
             if supplied!=expected:
@@ -899,6 +909,9 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
             existing=c.execute("SELECT lot_id FROM adv_lots WHERE user_id=? AND source_type='GREENHOUSE' AND source_id=?",
                                (user,body.harvestId)).fetchone()
             if existing: raise HTTPException(409,"Harvest already has an advanced inventory lot")
+            if c.execute("SELECT 1 FROM adv_lots WHERE user_id=? AND product_id=? AND lot_code=?",
+                         (user,harvest["product_id"],body.lotCode)).fetchone():
+                raise HTTPException(409,"Lot code already exists for this product")
             harvest_payload=decrypt_payload(harvest["payload"])
             unit=harvest_payload.get("unit","kg")
             lot_id=uuid.uuid4().hex
@@ -924,7 +937,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
             if order["order_type"]!="SALES": raise HTTPException(409,"Cost reconciliation is only available for sales orders")
             payload=decrypt_payload(order["payload"])
             shipped=c.execute("""SELECT movement_id,lot_id,quantity,created_at FROM adv_stock_movements
-              WHERE user_id=? AND movement_type='SHIPMENT_ISSUE'
+              WHERE user_id=? AND movement_type IN ('SHIPMENT_ISSUE','ISSUE')
                 AND reference_type='SALES_ORDER' AND reference_id=? ORDER BY created_at,movement_id""",
               (user,order_id)).fetchall()
             return_rows=c.execute("""SELECT quantity FROM adv_stock_movements
