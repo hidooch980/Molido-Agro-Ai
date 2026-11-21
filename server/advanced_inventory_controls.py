@@ -181,7 +181,7 @@ def register_advanced_inventory_control_routes(app, db, current_user) -> None:
                 take = min(remaining, available)
                 reservation_id = uuid.uuid4().hex
                 c.execute("INSERT INTO adv_reservations VALUES(?,?,?,?,?,?,?,?,?,?)",
-                  (reservation_id,user,body.idempotencyKey + ":" + reservation_id,row["lot_id"],
+                  (reservation_id,user,(body.idempotencyKey if not created else body.idempotencyKey + ":" + reservation_id),row["lot_id"],
                    body.warehouseId,body.referenceType,body.referenceId,format(take,"f"),"ACTIVE",now))
                 created.append({"reservationId":reservation_id,"lotId":row["lot_id"],
                                 "quantity":format(take,"f"),"expiryDate":row["expiry_date"]})
