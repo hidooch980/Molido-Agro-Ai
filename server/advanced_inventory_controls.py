@@ -101,6 +101,20 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         );
         CREATE INDEX IF NOT EXISTS idx_adv_control_docs_state
           ON adv_inventory_control_docs(user_id,document_type,state);
+        CREATE TABLE IF NOT EXISTS crop_cost_runs(
+          run_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+          greenhouse_id TEXT NOT NULL, crop_cycle_id TEXT NOT NULL, version INTEGER NOT NULL,
+          currency TEXT NOT NULL, output_quantity TEXT NOT NULL, output_unit TEXT NOT NULL,
+          capitalizable_cost TEXT NOT NULL, abnormal_waste_cost TEXT NOT NULL,
+          created_at INTEGER NOT NULL, UNIQUE(user_id,idempotency_key),
+          UNIQUE(user_id,crop_cycle_id,version)
+        );
+        CREATE TABLE IF NOT EXISTS crop_cost_allocations(
+          run_id TEXT NOT NULL, user_id TEXT NOT NULL, harvest_id TEXT NOT NULL,
+          quantity TEXT NOT NULL, unit TEXT NOT NULL, allocated_cost TEXT NOT NULL,
+          cost_per_unit TEXT NOT NULL, PRIMARY KEY(run_id,harvest_id),
+          FOREIGN KEY(run_id) REFERENCES crop_cost_runs(run_id)
+        );
         """)
 
     def actor(auth):
@@ -610,9 +624,10 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
               WHERE user_id=? AND movement_type='SHIPMENT_ISSUE'
                 AND reference_type='SALES_ORDER' AND reference_id=? ORDER BY created_at,movement_id""",
               (user,order_id)).fetchall()
-            returns=c.execute("""SELECT COALESCE(SUM(CAST(quantity AS NUMERIC)),0) quantity
-              FROM adv_stock_movements WHERE user_id=? AND movement_type='CUSTOMER_RETURN'
-                AND reference_type='SALES_RETURN' AND reference_id=?""",(user,order_id)).fetchone()["quantity"]
+            return_rows=c.execute("""SELECT quantity FROM adv_stock_movements
+              WHERE user_id=? AND movement_type='CUSTOMER_RETURN'
+                AND reference_type='SALES_RETURN' AND reference_id=?""",(user,order_id)).fetchall()
+            returns=sum((Decimal(row["quantity"]) for row in return_rows),Decimal("0"))
             cost_rows=[]; total_cogs=Decimal("0"); currencies=set(); missing=[]
             for item in shipped:
                 lot=c.execute("SELECT source_type,source_id,unit,product_id FROM adv_lots WHERE user_id=? AND lot_id=?",
@@ -643,11 +658,11 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
             ordered_quantity=sum((Decimal(str(line["quantity"])) for line in order_lines),Decimal("0"))
             shipped_quantity=sum((Decimal(item["quantity"]) for item in shipped),Decimal("0"))
             currency=next(iter(currencies)) if currencies else None
-            complete=bool(shipped) and not missing and shipped_quantity==ordered_quantity and Decimal(str(returns))==0
+            complete=bool(shipped) and not missing and shipped_quantity==ordered_quantity and returns==0
             status="PROVISIONAL_COGS" if complete else "NOT_FINALIZED_INCOMPLETE_COST_OR_SHIPMENT_OR_RETURNS"
         return {"orderId":order_id,"orderStatus":order["status"],"orderValue":str(order["total"]),
                 "orderedQuantity":format(ordered_quantity,"f"),"shippedQuantity":format(shipped_quantity,"f"),
-                "customerReturnQuantityPendingDisposition":str(returns),"cogs":format(total_cogs,"f"),
+                "customerReturnQuantityPendingDisposition":format(returns,"f"),"cogs":format(total_cogs,"f"),
                 "costCurrency":currency,"costedShipments":cost_rows,"missingCostLinks":missing,
                 "profitabilityStatus":status,
                 "grossMarginBeforeOtherAdjustments":format(Decimal(str(order["total"]))-total_cogs,"f") if complete else None}
