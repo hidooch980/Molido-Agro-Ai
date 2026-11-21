@@ -887,6 +887,11 @@ def test_sales_order_fulfillment_rejects_partial_inventory_reservations():
         "lines": [{"productId": p, "quantity": 5, "unitPrice": 100}],
     })
     assert order.status_code == 200, order.text
+    legacy_stock = client.post("/v1/erp/inventory/movements", headers=h, json={
+        "idempotencyKey": "sales-partial-legacy-stock-001", "productId": p,
+        "warehouseId": "main", "movementType": "RECEIPT", "quantity": 5,
+    })
+    assert legacy_stock.status_code == 200, legacy_stock.text
     received = lot(h, p, w, "sales-partial-lot-001", "SALES-PARTIAL-LOT", "10")
     release(h, received["lotId"])
     confirmed = client.post(f"/v1/erp/orders/{order.json()['id']}/transition", headers=h,
