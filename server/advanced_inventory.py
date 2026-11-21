@@ -223,8 +223,26 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
         user=actor(authorization); now=int(time.time()*1000); lot_id=uuid.uuid4().hex
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            duplicate=c.execute("SELECT movement_id FROM adv_stock_movements WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
-            if duplicate: return {"status":"duplicate","movementId":duplicate["movement_id"]}
+            duplicate=c.execute("""SELECT m.movement_id,m.movement_type,m.lot_id,m.product_id,m.destination_warehouse_id,m.quantity,
+              m.reference_type,m.reference_id,l.lot_code,l.unit,l.manufacture_date,l.harvest_date,l.received_date,l.expiry_date,
+              l.source_type,l.source_id
+              FROM adv_stock_movements m JOIN adv_lots l ON l.user_id=m.user_id AND l.lot_id=m.lot_id
+              WHERE m.user_id=? AND m.idempotency_key=?""",(user,body.idempotencyKey)).fetchone()
+            if duplicate:
+                same_request = (
+                    duplicate["movement_type"] == "RECEIPT" and duplicate["product_id"] == body.productId
+                    and duplicate["destination_warehouse_id"] == body.warehouseId
+                    and Decimal(duplicate["quantity"]) == body.quantity
+                    and duplicate["lot_code"] == body.lotCode and duplicate["unit"] == body.unit
+                    and duplicate["manufacture_date"] == body.manufactureDate
+                    and duplicate["harvest_date"] == body.harvestDate
+                    and duplicate["received_date"] == body.receivedDate
+                    and duplicate["expiry_date"] == body.expiryDate
+                    and duplicate["source_type"] == body.sourceType and duplicate["source_id"] == body.sourceId
+                )
+                if not same_request:
+                    raise HTTPException(409,"Idempotency key already belongs to a different lot receipt")
+                return {"status":"duplicate","movementId":duplicate["movement_id"]}
             ensure_warehouse(c,user,body.warehouseId); ensure_product(c,user,body.productId)
             if body.expiryDate and body.receivedDate and body.expiryDate < body.receivedDate:
                 raise HTTPException(422,"Expiry date cannot precede receipt date")
@@ -261,8 +279,18 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
         amount=qty(body.quantity)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            duplicate=c.execute("SELECT movement_id FROM adv_stock_movements WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
-            if duplicate: return {"status":"duplicate","movementId":duplicate["movement_id"]}
+            duplicate=c.execute("""SELECT movement_id,movement_type,lot_id,source_warehouse_id,destination_warehouse_id,quantity
+              FROM adv_stock_movements WHERE user_id=? AND idempotency_key=?""",(user,body.idempotencyKey)).fetchone()
+            if duplicate:
+                same_request = (
+                    duplicate["movement_type"] == "TRANSFER" and duplicate["lot_id"] == body.lotId
+                    and duplicate["source_warehouse_id"] == body.sourceWarehouseId
+                    and duplicate["destination_warehouse_id"] == body.destinationWarehouseId
+                    and Decimal(duplicate["quantity"]) == amount
+                )
+                if not same_request:
+                    raise HTTPException(409,"Idempotency key already belongs to a different stock transfer")
+                return {"status":"duplicate","movementId":duplicate["movement_id"]}
             ensure_warehouse(c,user,body.sourceWarehouseId); ensure_warehouse(c,user,body.destinationWarehouseId)
             lot=c.execute("SELECT product_id,quality_state FROM adv_lots WHERE user_id=? AND lot_id=?",(user,body.lotId)).fetchone()
             if not lot: raise HTTPException(404,"Lot not found in this account")
@@ -394,7 +422,14 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
             schema(c); c.execute("BEGIN IMMEDIATE")
             previous=c.execute("SELECT result FROM adv_fefo_allocations WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
             if previous:
-                result=json.loads(previous["result"]); result["status"]="duplicate"; return result
+                result=json.loads(previous["result"])
+                expected = {"productId": body.productId, "warehouseId": body.warehouseId,
+                            "requestedQuantity": format(body.quantity, "f"),
+                            "referenceType": body.referenceType, "referenceId": body.referenceId}
+                if any(key in result and result[key] != value for key, value in expected.items()):
+                    raise HTTPException(409,"Idempotency key already belongs to a different FEFO allocation")
+                result["status"]="duplicate"
+                return result
             ensure_warehouse(c,user,body.warehouseId); ensure_product(c,user,body.productId)
             rows=c.execute("""SELECT l.lot_id,l.product_id,l.expiry_date,l.received_date,l.created_at,b.quantity
               FROM adv_lots l JOIN adv_stock_balances b ON b.user_id=l.user_id AND b.lot_id=l.lot_id
@@ -425,7 +460,8 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
                 allocations.append({"reservationId":reservation_id,"lotId":row["lot_id"],"quantity":format(take,"f"),"expiryDate":row["expiry_date"]})
                 remaining-=take
             result={"status":"reserved","productId":body.productId,"warehouseId":body.warehouseId,
-              "requestedQuantity":format(body.quantity,"f"),"allocations":allocations}
+              "requestedQuantity":format(body.quantity,"f"),"referenceType":body.referenceType,
+              "referenceId":body.referenceId,"allocations":allocations}
             c.execute("INSERT INTO adv_fefo_allocations VALUES(?,?,?,?)",
               (user,body.idempotencyKey,json.dumps(result,separators=(",",":")),now))
         return result
