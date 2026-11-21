@@ -57,7 +57,27 @@ class ApprovalInput(BaseModel):
     idempotencyKey: str = Field(min_length=8, max_length=200)
 
 
-def register_advanced_inventory_control_routes(app, db, current_user) -> None:
+class OrderActionInput(BaseModel):
+    idempotencyKey: str = Field(min_length=8, max_length=200)
+    warehouseId: str = Field(min_length=1, max_length=200)
+
+
+class PurchaseReceiptLine(BaseModel):
+    productId: str = Field(min_length=1, max_length=200)
+    lotCode: str = Field(min_length=1, max_length=100)
+    quantity: Decimal = Field(gt=0, max_digits=24, decimal_places=6)
+    unit: str = Field(min_length=1, max_length=24)
+    expiryDate: str | None = None
+    receivedDate: str | None = None
+
+
+class PurchaseReceiptInput(BaseModel):
+    idempotencyKey: str = Field(min_length=8, max_length=200)
+    warehouseId: str = Field(min_length=1, max_length=200)
+    lines: list[PurchaseReceiptLine] = Field(min_length=1, max_length=200)
+
+
+def register_advanced_inventory_control_routes(app, db, current_user, decrypt_payload) -> None:
     def schema(c):
         c.executescript("""
         CREATE TABLE IF NOT EXISTS adv_inventory_control_docs(
@@ -385,3 +405,153 @@ def register_advanced_inventory_control_routes(app, db, current_user) -> None:
             c.execute("INSERT INTO adv_reservation_actions VALUES(?,?,?,?,?,?)",
                       (user,body.idempotencyKey,document_id,"COUNT_APPROVE",json.dumps(result),now))
         return result
+
+
+    @app.post("/v2/erp/inventory/orders/{order_id}/fefo-reservations")
+    def reserve_sales_order_fefo(order_id: str, body: OrderActionInput,
+                                 authorization: str | None = Header(default=None)):
+        user=actor(authorization); now=int(time.time()*1000)
+        with db() as c:
+            schema(c); c.execute("BEGIN IMMEDIATE")
+            replay=c.execute("SELECT result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
+                             (user,body.idempotencyKey)).fetchone()
+            if replay: return json.loads(replay["result"])
+            order=c.execute("SELECT order_type,status,payload FROM business_orders WHERE user_id=? AND order_id=?",
+                            (user,order_id)).fetchone()
+            if not order: raise HTTPException(404,"Sales order not found in this account")
+            if order["order_type"]!="SALES" or order["status"]!="CONFIRMED":
+                raise HTTPException(409,"Only confirmed sales orders can reserve FEFO stock")
+            if not c.execute("SELECT 1 FROM adv_warehouses WHERE user_id=? AND warehouse_id=? AND active=1",
+                             (user,body.warehouseId)).fetchone():
+                raise HTTPException(404,"Warehouse not found in this account")
+            payload=decrypt_payload(order["payload"]); allocations=[]
+            for index,line in enumerate(payload.get("lines",[])):
+                requested=amount(line["quantity"])
+                rows=c.execute("""SELECT l.lot_id,l.expiry_date,b.quantity
+                  FROM adv_lots l JOIN adv_stock_balances b
+                    ON b.user_id=l.user_id AND b.lot_id=l.lot_id
+                  WHERE l.user_id=? AND l.product_id=? AND b.warehouse_id=?
+                    AND l.quality_state='RELEASED'
+                    AND (l.expiry_date IS NULL OR l.expiry_date>=?)
+                  ORDER BY CASE WHEN l.expiry_date IS NULL THEN 1 ELSE 0 END,
+                    l.expiry_date,l.received_date,l.created_at,l.lot_id""",
+                  (user,line["productId"],body.warehouseId,time.strftime("%Y-%m-%d",time.gmtime()))).fetchall()
+                available_rows=[]; total=Decimal("0")
+                for row in rows:
+                    free=Decimal(row["quantity"])-reserved(c,user,body.warehouseId,row["lot_id"])
+                    if free>0:
+                        available_rows.append((row,free)); total+=free
+                if total<requested:
+                    raise HTTPException(409,f"Insufficient FEFO-eligible stock for order line {index+1}")
+                remaining=requested
+                for row,free in available_rows:
+                    if remaining<=0: break
+                    take=min(remaining,free); reservation_id=uuid.uuid4().hex
+                    key=f"{body.idempotencyKey}:{index}:{reservation_id}"
+                    c.execute("INSERT INTO adv_reservations VALUES(?,?,?,?,?,?,?,?,?,?)",
+                      (reservation_id,user,key,row["lot_id"],body.warehouseId,"SALES_ORDER",
+                       order_id,format(take,"f"),"ACTIVE",now))
+                    allocations.append({"line":index,"reservationId":reservation_id,"lotId":row["lot_id"],
+                                        "quantity":format(take,"f"),"expiryDate":row["expiry_date"]})
+                    remaining-=take
+            result={"status":"reserved","orderId":order_id,"allocationPolicy":"FEFO","allocations":allocations}
+            c.execute("INSERT INTO adv_reservation_actions VALUES(?,?,?,?,?,?)",
+                      (user,body.idempotencyKey,order_id,"ORDER_FEFO_RESERVE",json.dumps(result),now))
+        return result
+
+    @app.post("/v2/erp/inventory/orders/{order_id}/fulfill")
+    def fulfill_sales_order_inventory(order_id: str, body: ApprovalInput,
+                                      authorization: str | None = Header(default=None)):
+        user=actor(authorization); now=int(time.time()*1000)
+        with db() as c:
+            schema(c); c.execute("BEGIN IMMEDIATE")
+            replay=c.execute("SELECT result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
+                             (user,body.idempotencyKey)).fetchone()
+            if replay: return json.loads(replay["result"])
+            order=c.execute("SELECT order_type,status FROM business_orders WHERE user_id=? AND order_id=?",
+                            (user,order_id)).fetchone()
+            if not order: raise HTTPException(404,"Sales order not found in this account")
+            if order["order_type"]!="SALES" or order["status"]!="CONFIRMED":
+                raise HTTPException(409,"Only confirmed sales orders can be fulfilled")
+            reservations=c.execute("""SELECT * FROM adv_reservations
+              WHERE user_id=? AND reference_type='SALES_ORDER' AND reference_id=? AND state='ACTIVE'
+              ORDER BY created_at,reservation_id""",(user,order_id)).fetchall()
+            if not reservations: raise HTTPException(409,"No active FEFO reservations exist for this order")
+            shipped=[]
+            for reservation in reservations:
+                lot=c.execute("SELECT product_id,quality_state,expiry_date FROM adv_lots WHERE user_id=? AND lot_id=?",
+                              (user,reservation["lot_id"])).fetchone()
+                if not lot or lot["quality_state"]!="RELEASED":
+                    raise HTTPException(409,"A reserved lot is no longer released")
+                if lot["expiry_date"] and lot["expiry_date"]<time.strftime("%Y-%m-%d",time.gmtime()):
+                    raise HTTPException(409,"Expired lot cannot be shipped")
+                q=Decimal(reservation["quantity"]); on_hand=balance(c,user,reservation["warehouse_id"],reservation["lot_id"])
+                if on_hand<q: raise HTTPException(409,"Reserved stock is no longer available")
+                write_balance(c,user,reservation["warehouse_id"],reservation["lot_id"],on_hand-q,now)
+                move=movement(c,user,body.idempotencyKey+":"+reservation["reservation_id"],
+                              "SHIPMENT_ISSUE",reservation["lot_id"],lot["product_id"],
+                              reservation["warehouse_id"],q,"SALES_ORDER",order_id,now)
+                c.execute("UPDATE adv_reservations SET state='FULFILLED' WHERE user_id=? AND reservation_id=? AND state='ACTIVE'",
+                          (user,reservation["reservation_id"]))
+                shipped.append({"lotId":reservation["lot_id"],"quantity":format(q,"f"),"movementId":move})
+            c.execute("UPDATE business_orders SET status='SHIPPED' WHERE user_id=? AND order_id=? AND status='CONFIRMED'",
+                      (user,order_id))
+            result={"status":"shipped","orderId":order_id,"shipments":shipped}
+            c.execute("INSERT INTO adv_reservation_actions VALUES(?,?,?,?,?,?)",
+                      (user,body.idempotencyKey,order_id,"ORDER_FULFILL",json.dumps(result),now))
+        return result
+
+    @app.post("/v2/erp/inventory/orders/{order_id}/purchase-receipts")
+    def receive_purchase_order_inventory(order_id: str, body: PurchaseReceiptInput,
+                                         authorization: str | None = Header(default=None)):
+        user=actor(authorization); now=int(time.time()*1000)
+        with db() as c:
+            schema(c); c.execute("BEGIN IMMEDIATE")
+            old=c.execute("SELECT document_id,state FROM adv_inventory_control_docs WHERE user_id=? AND idempotency_key=?",
+                          (user,body.idempotencyKey)).fetchone()
+            if old: return {"status":"duplicate","documentId":old["document_id"],"state":old["state"]}
+            order=c.execute("SELECT order_type,status,payload FROM business_orders WHERE user_id=? AND order_id=?",
+                            (user,order_id)).fetchone()
+            if not order: raise HTTPException(404,"Purchase order not found in this account")
+            if order["order_type"]!="PURCHASE" or order["status"]!="CONFIRMED":
+                raise HTTPException(409,"Only confirmed purchase orders can be received")
+            if not c.execute("SELECT 1 FROM adv_warehouses WHERE user_id=? AND warehouse_id=? AND active=1",
+                             (user,body.warehouseId)).fetchone():
+                raise HTTPException(404,"Warehouse not found in this account")
+            order_payload=decrypt_payload(order["payload"])
+            expected={}
+            for line in order_payload.get("lines",[]):
+                expected[line["productId"]]=expected.get(line["productId"],Decimal("0"))+amount(line["quantity"])
+            supplied={}
+            for line in body.lines:
+                supplied[line.productId]=supplied.get(line.productId,Decimal("0"))+amount(line.quantity)
+                if not c.execute("SELECT 1 FROM business_products WHERE user_id=? AND product_id=?",
+                                 (user,line.productId)).fetchone():
+                    raise HTTPException(404,"Purchase order product not found in this account")
+                if line.expiryDate and line.receivedDate and line.expiryDate<line.receivedDate:
+                    raise HTTPException(422,"Expiry date cannot precede receipt date")
+            if supplied!=expected:
+                raise HTTPException(409,"Receipt quantities must exactly reconcile to purchase order lines")
+            document_id=uuid.uuid4().hex; receipts=[]
+            for index,line in enumerate(body.lines):
+                product=c.execute("SELECT payload FROM business_products WHERE user_id=? AND product_id=?",
+                                  (user,line.productId)).fetchone()
+                product_payload=decrypt_payload(product["payload"])
+                if product_payload.get("unit")!=line.unit:
+                    raise HTTPException(409,"Receipt unit does not match the product base unit")
+                lot_id=uuid.uuid4().hex
+                c.execute("INSERT INTO adv_lots VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (user,lot_id,line.productId,line.lotCode,line.unit,None,None,
+                   line.receivedDate or time.strftime("%Y-%m-%d",time.gmtime()),line.expiryDate,
+                   "SUPPLIER",order_id,"PENDING_INSPECTION",now))
+                write_balance(c,user,body.warehouseId,lot_id,amount(line.quantity),now)
+                move=movement(c,user,f"{body.idempotencyKey}:{index}","PURCHASE_RECEIPT",lot_id,
+                              line.productId,body.warehouseId,amount(line.quantity),"PURCHASE_ORDER",order_id,now)
+                receipts.append({"lotId":lot_id,"productId":line.productId,"quantity":format(amount(line.quantity),"f"),
+                                 "movementId":move,"qualityState":"PENDING_INSPECTION"})
+            c.execute("UPDATE business_orders SET status='RECEIVED' WHERE user_id=? AND order_id=? AND status='CONFIRMED'",
+                      (user,order_id))
+            c.execute("INSERT INTO adv_inventory_control_docs VALUES(?,?,?,?,?,?,?,?)",
+              (user,document_id,"PURCHASE_RECEIPT",body.idempotencyKey,"POSTED",
+               json.dumps({"orderId":order_id,"receipts":receipts},separators=(",",":")),now,now))
+        return {"status":"received_pending_inspection","orderId":order_id,"documentId":document_id,"receipts":receipts}
