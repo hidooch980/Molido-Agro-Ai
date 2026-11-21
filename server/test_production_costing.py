@@ -106,3 +106,50 @@ def test_cost_entries_are_tenant_isolated():
         "category": "ENERGY", "amount": "1000", "currency": "IRR", "sourceReference": "ENERGY-1"
     })
     assert foreign.status_code == 404
+
+def test_cost_entry_idempotency_rejects_changed_payload_and_preserves_original():
+    h = account("costidempotency")
+    gh, cycle = setup_cycle(h, "idempotency")
+    body = {
+        "idempotencyKey": "cost-entry-replay-0001", "greenhouseId": gh, "cropCycleId": cycle,
+        "category": "ENERGY", "amount": "1250.50", "currency": "IRR",
+        "quantity": "2.5", "unit": "kWh", "allocationMethod": "OUTPUT_QUANTITY",
+        "sourceReference": "METER-READ-001", "notes": "Initial meter cost"
+    }
+    first = client.post("/v2/erp/costs/entries", headers=h, json=body)
+    assert first.status_code == 200, first.text
+    duplicate = client.post("/v2/erp/costs/entries", headers=h, json=body)
+    assert duplicate.status_code == 200
+    assert duplicate.json()["status"] == "duplicate"
+    assert duplicate.json()["entryId"] == first.json()["entryId"]
+
+    changed = client.post("/v2/erp/costs/entries", headers=h, json={**body, "amount": "1251.50"})
+    assert changed.status_code == 409, changed.text
+    entries = client.get(f"/v2/erp/costs/cycles/{cycle}/entries", headers=h).json()["items"]
+    assert len(entries) == 1
+    assert entries[0]["amount"] == "1250.50"
+    assert entries[0]["approvalStatus"] == "PENDING_APPROVAL"
+
+
+def test_cost_run_idempotency_rejects_changed_cycle_or_currency():
+    h = account("costrunidempotency")
+    gh, cycle = setup_cycle(h, "runidempotency")
+    entry = client.post("/v2/erp/costs/entries", headers=h, json={
+        "idempotencyKey": "cost-run-seed-entry-01", "greenhouseId": gh, "cropCycleId": cycle,
+        "category": "LABOR", "amount": "500", "currency": "IRR", "sourceReference": "LABOR-01"
+    })
+    assert entry.status_code == 200, entry.text
+    approved = client.post(f"/v2/erp/costs/entries/{entry.json()['entryId']}/approve",
+        headers={**h, "X-Approval-Token": os.environ["MOLIDO_COST_APPROVAL_TOKEN"]})
+    assert approved.status_code == 200
+    body = {"idempotencyKey": "cost-run-replay-0001", "greenhouseId": gh,
+            "cropCycleId": cycle, "currency": "IRR"}
+    first = client.post("/v2/erp/costs/runs", headers=h, json=body)
+    assert first.status_code == 200, first.text
+    duplicate = client.post("/v2/erp/costs/runs", headers=h, json=body)
+    assert duplicate.status_code == 200 and duplicate.json()["status"] == "duplicate"
+    changed = client.post("/v2/erp/costs/runs", headers=h, json={**body, "currency": "USD"})
+    assert changed.status_code == 409, changed.text
+    summary = client.get(f"/v2/erp/costs/cycles/{cycle}/summary", headers=h).json()
+    assert len(summary["runs"]) == 1
+
