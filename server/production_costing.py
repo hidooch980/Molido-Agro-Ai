@@ -92,6 +92,10 @@ def register_production_costing_routes(app, db, current_user, decrypt_payload) -
         cc=c.execute("SELECT payload FROM records WHERE user_id=? AND entity_type='crop_cycle' AND entity_id=? AND deleted=0",(user,cycle)).fetchone()
         if not gh or not cc:
             raise HTTPException(404,"Greenhouse or crop cycle not found in this account")
+        cycle_payload=decrypt_payload(cc["payload"])
+        linked_greenhouse=cycle_payload.get("greenhouseId")
+        if linked_greenhouse != greenhouse:
+            raise HTTPException(409,"Crop cycle does not belong to the supplied greenhouse")
         return True
 
     @app.post("/v2/erp/costs/entries")
