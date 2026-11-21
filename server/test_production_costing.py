@@ -11,7 +11,6 @@ os.environ["MOLIDO_DB_PATH"] = str(DB)
 os.environ["MOLIDO_COST_APPROVAL_TOKEN"] = "cost-approval-token-for-ci-minimum-32"
 
 import app as app_module
-app_module.DB_PATH = DB
 from fastapi.testclient import TestClient
 client = TestClient(app_module.app)
 
