@@ -103,8 +103,25 @@ def register_production_costing_routes(app, db, current_user, decrypt_payload) -
         user=actor(authorization); now=int(time.time()*1000); ident=uuid.uuid4().hex
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            duplicate=c.execute("SELECT entry_id FROM crop_cost_entries WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
-            if duplicate: return {"status":"duplicate","entryId":duplicate["entry_id"]}
+            duplicate=c.execute("""SELECT entry_id,greenhouse_id,crop_cycle_id,category,amount,currency,
+              quantity,unit,allocation_method,source_reference,notes FROM crop_cost_entries
+              WHERE user_id=? AND idempotency_key=?""",(user,body.idempotencyKey)).fetchone()
+            if duplicate:
+                same_request = (
+                    duplicate["greenhouse_id"] == body.greenhouseId
+                    and duplicate["crop_cycle_id"] == body.cropCycleId
+                    and duplicate["category"] == body.category
+                    and decimal(duplicate["amount"]) == body.amount
+                    and duplicate["currency"] == body.currency
+                    and (decimal(duplicate["quantity"]) if duplicate["quantity"] is not None else None) == body.quantity
+                    and duplicate["unit"] == body.unit
+                    and duplicate["allocation_method"] == body.allocationMethod
+                    and duplicate["source_reference"] == body.sourceReference
+                    and duplicate["notes"] == body.notes
+                )
+                if not same_request:
+                    raise HTTPException(409,"Idempotency key already belongs to a different crop-cost entry")
+                return {"status":"duplicate","entryId":duplicate["entry_id"]}
             ensure_cycle(c,user,body.greenhouseId,body.cropCycleId)
             c.execute("""INSERT INTO crop_cost_entries(
               entry_id,user_id,idempotency_key,greenhouse_id,crop_cycle_id,category,amount,currency,
@@ -147,8 +164,14 @@ def register_production_costing_routes(app, db, current_user, decrypt_payload) -
         user=actor(authorization); now=int(time.time()*1000); run_id=uuid.uuid4().hex
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            duplicate=c.execute("SELECT run_id,version FROM crop_cost_runs WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
-            if duplicate: return {"status":"duplicate","runId":duplicate["run_id"],"version":duplicate["version"]}
+            duplicate=c.execute("""SELECT run_id,version,greenhouse_id,crop_cycle_id,currency
+              FROM crop_cost_runs WHERE user_id=? AND idempotency_key=?""",(user,body.idempotencyKey)).fetchone()
+            if duplicate:
+                if (duplicate["greenhouse_id"] != body.greenhouseId
+                    or duplicate["crop_cycle_id"] != body.cropCycleId
+                    or duplicate["currency"] != body.currency):
+                    raise HTTPException(409,"Idempotency key already belongs to a different crop-cost run")
+                return {"status":"duplicate","runId":duplicate["run_id"],"version":duplicate["version"]}
             ensure_cycle(c,user,body.greenhouseId,body.cropCycleId)
             entries=c.execute("SELECT category,amount,currency,allocation_method,approval_status FROM crop_cost_entries WHERE user_id=? AND greenhouse_id=? AND crop_cycle_id=?",
               (user,body.greenhouseId,body.cropCycleId)).fetchall()
