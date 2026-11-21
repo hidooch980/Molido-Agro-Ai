@@ -8,6 +8,8 @@ def test_classifies_dependency_migration_and_permissions():
  assert 'dependency' in AGENT.classify('ModuleNotFoundError: No module named x')
  assert 'migration' in AGENT.classify('sqlite no such column')
  assert 'permissions' in AGENT.classify('HTTP 403 forbidden')
+ assert AGENT.classify("NameError: name 'Path' is not defined") == ['test_harness_path']
+ assert AGENT.classify("can't open file '/repo/server/backup_db.py'") == ['test_harness_path']
 def test_unknown_failure_is_preserved():
  assert AGENT.classify('unrecognized failure') == ['unclassified_failure']
 def test_autofix_is_disabled_by_default():
