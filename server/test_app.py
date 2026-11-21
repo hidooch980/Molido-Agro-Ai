@@ -1,3 +1,4 @@
+from pathlib import Path
 import os, tempfile
 os.environ["MOLIDO_JWT_SECRET"]="test-secret-that-is-long-enough-for-hmac-sha256"
 os.environ["MOLIDO_DATA_KEY"]="eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg"
