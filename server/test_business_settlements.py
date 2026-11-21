@@ -36,7 +36,11 @@ def setup_delivered_sales_order():
         "lines": [{"productId": product["id"], "quantity": 5, "unitPrice": 100}]
     })
     assert order.status_code == 200, order.text
-    for action, key in [("CONFIRM", "confirm-order-0001"), ("DELIVER", "deliver-order-0001")]:
+    for action, key in [
+        ("CONFIRM", "confirm-order-0001"),
+        ("SHIP", "ship-order-0001"),
+        ("DELIVER", "deliver-order-0001"),
+    ]:
         result = client.post(f"/v1/erp/orders/{order.json()['id']}/transition", headers=h,
                              json={"action": action, "idempotencyKey": key})
         assert result.status_code == 200, result.text
