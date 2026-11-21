@@ -176,3 +176,29 @@ def test_order_transition_idempotency_key_is_bound_to_order_and_action():
     assert states[first_order["id"]] == "CONFIRMED"
     assert states[second_order["id"]] == "DRAFT"
 
+def test_harvest_idempotency_prevents_duplicate_inventory_receipt():
+    h = account("workflowHarvestIdempotency")
+    p = product(h)
+    push = client.post("/v1/sync/push", headers=h, json={"operations": [
+        {"idempotencyKey": "gh-harvest-idempotent-01", "entityType": "greenhouse", "entityId": "gh-idem",
+         "operation": "CREATE", "payload": {"name": "Harvest greenhouse"}, "baseVersion": 0},
+        {"idempotencyKey": "cycle-harvest-idem-1", "entityType": "crop_cycle", "entityId": "cycle-idem",
+         "operation": "CREATE", "payload": {"greenhouseId": "gh-idem", "cropCode": "TOMATO"}, "baseVersion": 0}
+    ]})
+    assert push.status_code == 200, push.text
+    body = {"idempotencyKey": "harvest-receipt-idempotency-001", "greenhouseId": "gh-idem",
+            "cropCycleId": "cycle-idem", "productId": p["id"], "warehouseId": "main",
+            "quantity": 22, "unitPrice": 80, "unit": "kg"}
+    first = client.post("/v1/erp/greenhouse/harvests", headers=h, json=body)
+    assert first.status_code == 200, first.text
+    duplicate = client.post("/v1/erp/greenhouse/harvests", headers=h, json=body)
+    assert duplicate.status_code == 200, duplicate.text
+    assert duplicate.json()["duplicate"] is True
+    assert duplicate.json()["id"] == first.json()["id"]
+
+    changed = client.post("/v1/erp/greenhouse/harvests", headers=h, json={**body, "quantity": 25})
+    assert changed.status_code == 409, changed.text
+    balances = client.get("/v1/erp/inventory/balances", headers=h).json()["items"]
+    assert len(balances) == 1
+    assert balances[0]["quantity"] == 22
+
