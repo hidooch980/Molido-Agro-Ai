@@ -581,3 +581,50 @@ def test_reservation_idempotency_keys_cannot_be_reused_for_different_requests_or
         json={"idempotencyKey": "reservation-action-key-01", "action": "RELEASE"},
     )
     assert reused_for_other_reservation.status_code == 409
+
+def test_return_idempotency_key_rejects_changed_payload():
+    h = account("return-key-replay")
+    p = product(h, "CUC-RETURN-REPLAY")
+    w = warehouse(h, "RETURN-REPLAY")
+    received = lot(h, p, w, key="return-replay-lot-01", code="RETURN-REPLAY-LOT", quantity="10")
+    body = {"idempotencyKey":"return-replay-key-001","direction":"CUSTOMER_RETURN",
+            "lotId":received["lotId"],"warehouseId":w,"quantity":"2",
+            "referenceId":"SALE-RETURN-01","reason":"Damaged package","currency":"IRR"}
+    first = client.post("/v2/erp/inventory/returns", headers=h, json=body)
+    assert first.status_code == 200, first.text
+    duplicate = client.post("/v2/erp/inventory/returns", headers=h, json=body)
+    assert duplicate.status_code == 200 and duplicate.json()["documentId"] == first.json()["documentId"]
+    changed = client.post("/v2/erp/inventory/returns", headers=h, json={**body,"quantity":"3"})
+    assert changed.status_code == 409
+
+
+def test_scrap_idempotency_key_rejects_changed_payload():
+    h = account("scrap-key-replay")
+    p = product(h, "CUC-SCRAP-REPLAY")
+    w = warehouse(h, "SCRAP-REPLAY")
+    received = lot(h, p, w, key="scrap-replay-lot-01", code="SCRAP-REPLAY-LOT", quantity="10")
+    body = {"idempotencyKey":"scrap-replay-key-001","lotId":received["lotId"],
+            "warehouseId":w,"quantity":"2","reasonCode":"DAMAGED","reason":"Damaged stock",
+            "sourceReference":"QC-001","currency":"IRR"}
+    first = client.post("/v2/erp/inventory/scrap", headers=h, json=body)
+    assert first.status_code == 200, first.text
+    duplicate = client.post("/v2/erp/inventory/scrap", headers=h, json=body)
+    assert duplicate.status_code == 200 and duplicate.json()["documentId"] == first.json()["documentId"]
+    changed = client.post("/v2/erp/inventory/scrap", headers=h, json={**body,"quantity":"3"})
+    assert changed.status_code == 409
+
+
+def test_cycle_count_idempotency_key_rejects_changed_count_lines():
+    h = account("count-key-replay")
+    p = product(h, "CUC-COUNT-REPLAY")
+    w = warehouse(h, "COUNT-REPLAY")
+    received = lot(h, p, w, key="count-replay-lot-01", code="COUNT-REPLAY-LOT", quantity="10")
+    body = {"idempotencyKey":"count-replay-key-001","warehouseId":w,"reason":"Monthly count",
+            "lines":[{"lotId":received["lotId"],"countedQuantity":"9"}]}
+    first = client.post("/v2/erp/inventory/cycle-counts", headers=h, json=body)
+    assert first.status_code == 200, first.text
+    duplicate = client.post("/v2/erp/inventory/cycle-counts", headers=h, json=body)
+    assert duplicate.status_code == 200 and duplicate.json()["documentId"] == first.json()["documentId"]
+    changed = client.post("/v2/erp/inventory/cycle-counts", headers=h,
+                          json={**body,"lines":[{"lotId":received["lotId"],"countedQuantity":"8"}]})
+    assert changed.status_code == 409
