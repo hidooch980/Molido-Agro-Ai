@@ -2,7 +2,7 @@ name: Android Release Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/advanced-inventory-costing-iran-accounting]
     tags: ['v*']
   pull_request:
     branches: [main]
