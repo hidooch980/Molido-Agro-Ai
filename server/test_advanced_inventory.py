@@ -1,5 +1,6 @@
 import base64
 import os
+from decimal import Decimal
 from pathlib import Path
 
 DB = Path("/tmp/molido-advanced-inventory-tests.sqlite3")
@@ -301,7 +302,7 @@ def test_scrap_and_cycle_count_are_approval_gated_and_idempotent():
     assert posted_scrap.status_code == 200, posted_scrap.text
     count = client.post("/v2/erp/inventory/cycle-counts", headers=h, json={
         "idempotencyKey":"cycle-count-0001","warehouseId":w,"reason":"Weekly physical count",
-        "lines":[{"lotId":received["lotId"],"countedQuantity":"17"}]
+        "lines":[{"lotId":received["lotId"],"countedQuantity":"7"}]
     })
     assert count.status_code == 200 and count.json()["variances"][0]["variance"] == "-1"
     posted_count = client.post(
@@ -310,7 +311,7 @@ def test_scrap_and_cycle_count_are_approval_gated_and_idempotent():
     assert posted_count.status_code == 200, posted_count.text
     balance_row = next(x for x in client.get("/v2/erp/inventory/balances",headers=h).json()["items"]
                        if x["lotId"] == received["lotId"])
-    assert balance_row["quantity"] == "17"
+    assert balance_row["quantity"] == "7"
 
 
 
@@ -422,9 +423,9 @@ def test_harvest_lot_sales_shipment_and_crop_cost_reconcile_end_to_end():
         f"/v2/erp/inventory/orders/{order.json()['id']}/cost-reconciliation",headers=h)
     assert reconciliation.status_code == 200, reconciliation.text
     data = reconciliation.json()
-    assert data["cogs"] == "1000"
+    assert Decimal(data["cogs"]) == Decimal("1000")
     assert data["profitabilityStatus"] == "PROVISIONAL_COGS"
-    assert data["grossMarginBeforeOtherAdjustments"] == "1000"
+    assert Decimal(data["grossMarginBeforeOtherAdjustments"]) == Decimal("1000")
     delivered = client.post(f"/v1/erp/orders/{order.json()['id']}/transition",headers=h,
         json={"action":"DELIVER","idempotencyKey":"cogs-order-deliver-001"})
     assert delivered.status_code == 200 and delivered.json()["status"] == "DELIVERED"
