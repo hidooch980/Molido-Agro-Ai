@@ -20,6 +20,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   diagnose:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref != 'feature/bughunter-autofix-agent'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
