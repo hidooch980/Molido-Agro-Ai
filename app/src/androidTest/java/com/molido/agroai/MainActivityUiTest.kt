@@ -29,7 +29,7 @@ class MainActivityUiTest {
     @Test
     fun crmErpWorkspaceIsAvailableInPersianNavigation() {
         composeRule.onNodeWithText("CRM/ERP").performClick()
-        composeRule.onNodeWithText("مدیریت یکپارچه CRM و ERP").assertIsDisplayed()
-        composeRule.onNodeWithText("ذخیره محلی و افزودن به صف همگام‌سازی").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("مدیریت مشتری و کسب‌وکار").assertIsDisplayed()
+        composeRule.onNodeWithText("برای نگهداری اطلاعات خصوصی، ابتدا وارد حساب شوید.").assertIsDisplayed()
     }
 }
