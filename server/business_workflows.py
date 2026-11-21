@@ -257,14 +257,25 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
             if action=="CONFIRM":
                 if state!="DRAFT": raise HTTPException(409,"Only draft orders can be confirmed")
                 if order["order_type"]=="SALES":
-                    for line in lines:
-                        warehouse="main"
-                        balance=c.execute("SELECT quantity FROM inventory_balances WHERE user_id=? AND warehouse_id=? AND product_id=?",(user,warehouse,line["productId"])).fetchone()
-                        available=float(balance["quantity"]) if balance else 0.0
-                        reserved=c.execute("SELECT COALESCE(SUM(quantity),0) q FROM order_reservations WHERE user_id=? AND warehouse_id=? AND product_id=? AND state='RESERVED'",(user,warehouse,line["productId"])).fetchone()["q"]
-                        if available-float(reserved)<float(line["quantity"]): raise HTTPException(409,"Insufficient available stock to reserve order")
-                    for line in lines:
-                        c.execute("INSERT INTO order_reservations VALUES(?,?,?,?,?,?,?)",(user,order_id,"main",line["productId"],line["quantity"],"RESERVED",now))
+                    advanced_table=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='adv_reservations'").fetchone()
+                    advanced_rows=[]
+                    if advanced_table:
+                        advanced_rows=c.execute("SELECT product_id,quantity FROM adv_reservations r JOIN adv_lots l ON l.user_id=r.user_id AND l.lot_id=r.lot_id WHERE r.user_id=? AND r.reference_type='SALES_ORDER' AND r.reference_id=? AND r.state='ACTIVE'",(user,order_id)).fetchall()
+                    if advanced_rows:
+                        from decimal import Decimal
+                        for line in lines:
+                            reserved_qty=sum((Decimal(r["quantity"]) for r in advanced_rows if r["product_id"]==line["productId"]),Decimal("0"))
+                            if reserved_qty < Decimal(str(line["quantity"])):
+                                raise HTTPException(409,"Advanced lot reservations do not cover every sales order line")
+                    else:
+                        for line in lines:
+                            warehouse="main"
+                            balance=c.execute("SELECT quantity FROM inventory_balances WHERE user_id=? AND warehouse_id=? AND product_id=?",(user,warehouse,line["productId"])).fetchone()
+                            available=float(balance["quantity"]) if balance else 0.0
+                            reserved=c.execute("SELECT COALESCE(SUM(quantity),0) q FROM order_reservations WHERE user_id=? AND warehouse_id=? AND product_id=? AND state='RESERVED'",(user,warehouse,line["productId"])).fetchone()["q"]
+                            if available-float(reserved)<float(line["quantity"]): raise HTTPException(409,"Insufficient available stock to reserve order")
+                        for line in lines:
+                            c.execute("INSERT INTO order_reservations VALUES(?,?,?,?,?,?,?)",(user,order_id,"main",line["productId"],line["quantity"],"RESERVED",now))
                 state="CONFIRMED"
             elif action=="CANCEL":
                 if state not in ("DRAFT","CONFIRMED"): raise HTTPException(409,"Order cannot be cancelled in this state")
