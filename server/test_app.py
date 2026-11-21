@@ -30,6 +30,28 @@ def test_idempotency_and_conflict(tmp_path, monkeypatch):
     stale={**op,"idempotencyKey":"stale-key","payload":{"quantity":2},"baseVersion":0}
     assert c.post("/v1/sync/push",json={"operations":[stale]},headers=h).json()["results"][0]["status"]=="conflict"
 
+def test_harvest_sync_accepts_current_and_legacy_entity_types(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DB_PATH", tmp_path / "harvest-sync.sqlite3")
+    app.init_db()
+    client = TestClient(app.app)
+    token = client.post("/v1/auth/register",json={
+        "username":"grower_harvest_sync","password":"strong-password-987"
+    }).json()["accessToken"]
+    headers = {"Authorization":f"Bearer {token}"}
+    for index, entity_type in enumerate(("harvest_batch", "harvest")):
+        operation = {
+            "idempotencyKey":f"harvest-sync-{index}",
+            "entityType":entity_type,
+            "entityId":f"harvest-{index}",
+            "operation":"CREATE",
+            "payload":{"quantity":12,"unit":"kg"},
+            "baseVersion":0,
+        }
+        response = client.post("/v1/sync/push",json={"operations":[operation]},headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["results"][0]["status"] == "applied"
+
+
 def test_change_log_cursor_paginates_without_skipping_rows(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "DB_PATH", tmp_path / "cursor.sqlite3"); app.init_db()
     client=TestClient(app.app)
