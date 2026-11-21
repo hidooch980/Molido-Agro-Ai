@@ -57,7 +57,7 @@ def safe_fixes(enabled: bool) -> dict:
   path = ROOT / name
   if path.is_file() and path.read_bytes() != original:
    changed.append(name)
- _SAFE_FIX_RESULT_SNAPSHOT = {name: (ROOT / name).read_bytes() for name in changed}
+ _SAFE_FIX_RESULT_SNAPSHOT = {p.relative_to(ROOT).as_posix(): p.read_bytes() for p in (ROOT / 'server').rglob('*.py') if p.is_file()}
  return {'enabled': True, 'status': 'completed' if p.returncode == 0 else 'needs_review', 'exit_code': p.returncode, 'rule_allowlist': ['F401','F541','E711','E712'], 'changed_files': sorted(changed), 'output_tail': '\n'.join((p.stdout or '').splitlines()[-60:])}
 def main() -> int:
  ap=argparse.ArgumentParser(); ap.add_argument('--report-dir',default='artifacts/bughunter'); ap.add_argument('--timeout',type=int,default=1800); ap.add_argument('--apply-safe-fixes',action='store_true'); args=ap.parse_args()
