@@ -29,6 +29,8 @@ class ReturnInput(BaseModel):
     quantity: Decimal = Field(gt=0, max_digits=24, decimal_places=6)
     referenceId: str = Field(min_length=1, max_length=200)
     reason: str = Field(min_length=3, max_length=1000)
+    accountingAmount: Decimal | None = Field(default=None, gt=0, max_digits=24, decimal_places=2)
+    currency: str = Field(default="IRR", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
 
 
 class ScrapInput(BaseModel):
@@ -39,6 +41,10 @@ class ScrapInput(BaseModel):
     reasonCode: Literal["EXPIRED", "DAMAGED", "QUALITY_REJECT", "CONTAMINATION", "PROCESS_LOSS", "OTHER"]
     reason: str = Field(min_length=3, max_length=1000)
     sourceReference: str = Field(min_length=2, max_length=200)
+    greenhouseId: str | None = Field(default=None, max_length=200)
+    cropCycleId: str | None = Field(default=None, max_length=200)
+    unitCost: Decimal | None = Field(default=None, gt=0, max_digits=24, decimal_places=6)
+    currency: str = Field(default="IRR", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
 
 
 class CountLine(BaseModel):
@@ -85,7 +91,7 @@ class HarvestLotInput(BaseModel):
     expiryDate: str | None = None
 
 
-def register_advanced_inventory_control_routes(app, db, current_user, decrypt_payload) -> None:
+def register_advanced_inventory_control_routes(app, db, current_user, decrypt_payload, encrypt_payload) -> None:
     def schema(c):
         c.executescript("""
         CREATE TABLE IF NOT EXISTS adv_inventory_control_docs(
@@ -101,6 +107,16 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         );
         CREATE INDEX IF NOT EXISTS idx_adv_control_docs_state
           ON adv_inventory_control_docs(user_id,document_type,state);
+        CREATE TABLE IF NOT EXISTS crop_cost_entries(
+          entry_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+          greenhouse_id TEXT NOT NULL, crop_cycle_id TEXT NOT NULL, category TEXT NOT NULL,
+          amount TEXT NOT NULL, currency TEXT NOT NULL, quantity TEXT, unit TEXT,
+          allocation_method TEXT NOT NULL, source_reference TEXT NOT NULL,
+          notes TEXT NOT NULL, actor_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+          approval_status TEXT NOT NULL DEFAULT 'PENDING_APPROVAL', approved_by TEXT, approved_at INTEGER,
+          UNIQUE(user_id,idempotency_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_crop_cost_cycle ON crop_cost_entries(user_id,crop_cycle_id,created_at);
         CREATE TABLE IF NOT EXISTS crop_cost_runs(
           run_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL,
           greenhouse_id TEXT NOT NULL, crop_cycle_id TEXT NOT NULL, version INTEGER NOT NULL,
@@ -166,6 +182,31 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         expected = os.environ.get("MOLIDO_INVENTORY_APPROVAL_TOKEN", "")
         if len(expected) < 32 or not token or not secrets.compare_digest(expected, token):
             raise HTTPException(403, "Inventory approval is not configured or token is invalid")
+
+    def replay_control_action(c, user, key, expected_action, document_id):
+        prior = c.execute(
+            "SELECT reservation_id,action,result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
+            (user, key),
+        ).fetchone()
+        if not prior:
+            return None
+        if prior["action"] != expected_action or prior["reservation_id"] != document_id:
+            raise HTTPException(409, "Idempotency key already belongs to a different action or document")
+        return json.loads(prior["result"])
+
+    def ensure_crop_cycle(c, user, greenhouse_id, crop_cycle_id):
+        greenhouse = c.execute(
+            "SELECT 1 FROM records WHERE user_id=? AND entity_type='greenhouse' AND entity_id=? AND deleted=0",
+            (user, greenhouse_id),
+        ).fetchone()
+        cycle = c.execute(
+            "SELECT payload FROM records WHERE user_id=? AND entity_type='crop_cycle' AND entity_id=? AND deleted=0",
+            (user, crop_cycle_id),
+        ).fetchone()
+        if not greenhouse or not cycle:
+            raise HTTPException(404, "Greenhouse or crop cycle not found in this account")
+        if decrypt_payload(cycle["payload"]).get("greenhouseId") != greenhouse_id:
+            raise HTTPException(409, "Crop cycle does not belong to the supplied greenhouse")
 
     def get_doc(c, user, document_id, expected_type):
         row = c.execute("""SELECT * FROM adv_inventory_control_docs
@@ -258,7 +299,9 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
             payload = {"direction":body.direction,"lotId":body.lotId,"warehouseId":body.warehouseId,
                        "quantity":format(requested,"f"),"referenceId":body.referenceId,
                        "reason":body.reason,"productId":lot["product_id"],"lotCode":lot["lot_code"],
-                       "unit":lot["unit"],"expiryDate":lot["expiry_date"]}
+                       "unit":lot["unit"],"expiryDate":lot["expiry_date"],
+                       "accountingAmount":format(body.accountingAmount,"f") if body.accountingAmount is not None else None,
+                       "currency":body.currency}
             c.execute("INSERT INTO adv_inventory_control_docs VALUES(?,?,?,?,?,?,?,?)",
               (user,document_id,"RETURN",body.idempotencyKey,"PENDING_APPROVAL",
                json.dumps(payload,separators=(",",":")),now,now))
@@ -272,10 +315,9 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            prior=c.execute("SELECT result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
-                            (user,body.idempotencyKey)).fetchone()
-            if prior:
-                return json.loads(prior["result"])
+            replay = replay_control_action(c,user,body.idempotencyKey,"RETURN_APPROVE",document_id)
+            if replay is not None:
+                return replay
             doc=get_doc(c,user,document_id,"RETURN")
             if doc["state"]!="PENDING_APPROVAL":
                 raise HTTPException(409,"Return is not pending approval")
@@ -298,7 +340,51 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                 write_balance(c,user,data["warehouseId"],returned_lot_id,q,now)
                 move=movement(c,user,body.idempotencyKey,"CUSTOMER_RETURN",returned_lot_id,
                               data["productId"],data["warehouseId"],q,"SALES_RETURN",data["referenceId"],now)
-            result={"status":"approved","documentId":document_id,"lotId":returned_lot_id,"movementId":move}
+            journal_id = None
+            if data.get("accountingAmount") is not None:
+                c.executescript("""
+                CREATE TABLE IF NOT EXISTS approval_ledger_accounts(
+                  user_id TEXT NOT NULL, account_code TEXT NOT NULL, name TEXT NOT NULL,
+                  account_type TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+                  PRIMARY KEY(user_id,account_code)
+                );
+                CREATE TABLE IF NOT EXISTS approval_ledger_journals(
+                  user_id TEXT NOT NULL, journal_id TEXT NOT NULL, reference TEXT,
+                  description TEXT NOT NULL, currency TEXT NOT NULL, total_debit REAL NOT NULL,
+                  status TEXT NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL,
+                  PRIMARY KEY(user_id,journal_id)
+                );
+                """)
+                ledger_accounts = [
+                    ("1100","حساب‌های دریافتنی","ASSET"),
+                    ("1200","موجودی کالا","ASSET"),
+                    ("2000","حساب‌های پرداختنی","LIABILITY"),
+                    ("4100","مرجوعی فروش و تخفیفات","REVENUE"),
+                ]
+                for code,name,kind in ledger_accounts:
+                    c.execute("INSERT OR IGNORE INTO approval_ledger_accounts VALUES(?,?,?,?,1)",(user,code,name,kind))
+                value = Decimal(data["accountingAmount"])
+                if data["direction"] == "CUSTOMER_RETURN":
+                    journal_lines = [
+                        {"accountCode":"4100","debit":float(value),"credit":0,"description":"Customer sales return"},
+                        {"accountCode":"1100","debit":0,"credit":float(value),"description":"Customer credit note"},
+                    ]
+                    journal_description = "Customer return credit note"
+                else:
+                    journal_lines = [
+                        {"accountCode":"2000","debit":float(value),"credit":0,"description":"Supplier return payable adjustment"},
+                        {"accountCode":"1200","debit":0,"credit":float(value),"description":"Supplier return inventory valuation"},
+                    ]
+                    journal_description = "Supplier return payable and inventory adjustment"
+                journal_id = uuid.uuid4().hex
+                journal_payload = {"description":journal_description,"reference":document_id,
+                                   "currency":data["currency"],"lines":journal_lines}
+                c.execute("INSERT INTO approval_ledger_journals VALUES(?,?,?,?,?,?,?,?,?)",
+                          (user,journal_id,document_id,journal_description,data["currency"],float(value),
+                           "PENDING_APPROVAL",encrypt_payload(journal_payload),now))
+            result={"status":"approved","documentId":document_id,"lotId":returned_lot_id,"movementId":move,
+                    "accountingStatus":"PENDING_LEDGER_APPROVAL" if journal_id else "VALUATION_REQUIRED",
+                    "journalId":journal_id}
             c.execute("UPDATE adv_inventory_control_docs SET state='POSTED',updated_at=? WHERE user_id=? AND document_id=?",
                       (now,user,document_id))
             c.execute("INSERT INTO adv_reservation_actions VALUES(?,?,?,?,?,?)",
@@ -315,14 +401,26 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                           (user,body.idempotencyKey)).fetchone()
             if old:
                 return {"status":"duplicate","documentId":old["document_id"],"state":old["state"]}
-            lot=c.execute("SELECT product_id FROM adv_lots WHERE user_id=? AND lot_id=?",(user,body.lotId)).fetchone()
+            lot=c.execute("SELECT product_id,unit FROM adv_lots WHERE user_id=? AND lot_id=?",(user,body.lotId)).fetchone()
             if not lot: raise HTTPException(404,"Lot not found in this account")
+            if not c.execute("SELECT 1 FROM adv_warehouses WHERE user_id=? AND warehouse_id=? AND active=1",
+                             (user,body.warehouseId)).fetchone():
+                raise HTTPException(404,"Warehouse not found in this account")
+            if body.unitCost is not None:
+                if not body.greenhouseId or not body.cropCycleId:
+                    raise HTTPException(422,"Greenhouse and crop cycle are required when scrap cost is supplied")
+                ensure_crop_cycle(c,user,body.greenhouseId,body.cropCycleId)
+            elif body.greenhouseId or body.cropCycleId:
+                raise HTTPException(422,"A unit cost is required to create a crop-cycle waste cost entry")
             on_hand=balance(c,user,body.warehouseId,body.lotId)
             if on_hand-reserved(c,user,body.warehouseId,body.lotId)<q:
                 raise HTTPException(409,"Scrap exceeds unreserved stock")
             payload={"lotId":body.lotId,"warehouseId":body.warehouseId,"quantity":format(q,"f"),
                      "reasonCode":body.reasonCode,"reason":body.reason,"sourceReference":body.sourceReference,
-                     "productId":lot["product_id"]}
+                     "productId":lot["product_id"],"unit":lot["unit"],
+                     "greenhouseId":body.greenhouseId,"cropCycleId":body.cropCycleId,
+                     "unitCost":format(body.unitCost,"f") if body.unitCost is not None else None,
+                     "currency":body.currency}
             c.execute("INSERT INTO adv_inventory_control_docs VALUES(?,?,?,?,?,?,?,?)",
               (user,document_id,"SCRAP",body.idempotencyKey,"PENDING_APPROVAL",
                json.dumps(payload,separators=(",",":")),now,now))
@@ -336,9 +434,9 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            prior=c.execute("SELECT result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
-                            (user,body.idempotencyKey)).fetchone()
-            if prior: return json.loads(prior["result"])
+            replay = replay_control_action(c,user,body.idempotencyKey,"SCRAP_APPROVE",document_id)
+            if replay is not None:
+                return replay
             doc=get_doc(c,user,document_id,"SCRAP")
             if doc["state"]!="PENDING_APPROVAL": raise HTTPException(409,"Scrap is not pending approval")
             data=json.loads(doc["payload"]); q=Decimal(data["quantity"]); lot_id=data["lotId"]
@@ -348,7 +446,21 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
             write_balance(c,user,data["warehouseId"],lot_id,on_hand-q,now)
             move=movement(c,user,body.idempotencyKey,"SCRAP",lot_id,data["productId"],data["warehouseId"],
                           q,"SCRAP",document_id,now)
-            result={"status":"posted","documentId":document_id,"movementId":move,"quantity":format(q,"f")}
+            cost_entry_id = None
+            if data.get("unitCost") is not None:
+                cost_entry_id = uuid.uuid4().hex
+                cost_amount = q * Decimal(data["unitCost"])
+                c.execute("""INSERT INTO crop_cost_entries(
+                  entry_id,user_id,idempotency_key,greenhouse_id,crop_cycle_id,category,amount,currency,
+                  quantity,unit,allocation_method,source_reference,notes,actor_id,created_at,approval_status)
+                  VALUES(?,?,?,?,?,'WASTE_ABNORMAL',?,?,?,?,?,?,?,?,?,'PENDING_APPROVAL')""",
+                  (cost_entry_id,user,"inventory-scrap-cost:"+document_id,data["greenhouseId"],data["cropCycleId"],
+                   format(cost_amount,"f"),data["currency"],format(q,"f"),data["unit"],"OUTPUT_QUANTITY",
+                   "INVENTORY_SCRAP:"+document_id,
+                   f'{data["reasonCode"]}: {data["reason"]}; source={data["sourceReference"]}',user,now))
+            result={"status":"posted","documentId":document_id,"movementId":move,"quantity":format(q,"f"),
+                    "cropCostStatus":"PENDING_COST_APPROVAL" if cost_entry_id else "NOT_LINKED",
+                    "costEntryId":cost_entry_id}
             c.execute("UPDATE adv_inventory_control_docs SET state='POSTED',updated_at=? WHERE user_id=? AND document_id=?",
                       (now,user,document_id))
             c.execute("INSERT INTO adv_reservation_actions VALUES(?,?,?,?,?,?)",
@@ -373,7 +485,13 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                 counted=amount(line.countedQuantity,allow_zero=True)
                 lot=c.execute("SELECT 1 FROM adv_lots WHERE user_id=? AND lot_id=?",(user,line.lotId)).fetchone()
                 if not lot: raise HTTPException(404,"Count lot not found in this account")
-                expected=balance(c,user,body.warehouseId,line.lotId)
+                stock_row=c.execute(
+                    "SELECT quantity FROM adv_stock_balances WHERE user_id=? AND warehouse_id=? AND lot_id=?",
+                    (user,body.warehouseId,line.lotId),
+                ).fetchone()
+                if not stock_row:
+                    raise HTTPException(404,"Lot has no stock record in the selected warehouse")
+                expected=Decimal(stock_row["quantity"])
                 snapshots.append((line.lotId,expected,counted))
             payload={"warehouseId":body.warehouseId,"reason":body.reason}
             c.execute("INSERT INTO adv_inventory_control_docs VALUES(?,?,?,?,?,?,?,?)",
@@ -395,9 +513,9 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            prior=c.execute("SELECT result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
-                            (user,body.idempotencyKey)).fetchone()
-            if prior: return json.loads(prior["result"])
+            replay = replay_control_action(c,user,body.idempotencyKey,"COUNT_APPROVE",document_id)
+            if replay is not None:
+                return replay
             doc=get_doc(c,user,document_id,"CYCLE_COUNT")
             if doc["state"]!="PENDING_APPROVAL": raise HTTPException(409,"Count is not pending approval")
             data=json.loads(doc["payload"]); warehouse=data["warehouseId"]
