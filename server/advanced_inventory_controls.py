@@ -329,15 +329,13 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
                 created.append({"reservationId":reservation_id,"lotId":row["lot_id"],
                                 "quantity":format(take,"f"),"expiryDate":row["expiry_date"]})
                 remaining -= take
-        result = {
-            "status": "reserved", "allocationPolicy": "FEFO",
-            "productId": body.productId, "warehouseId": body.warehouseId,
-            "requestedQuantity": format(requested, "f"),
-            "referenceType": body.referenceType, "referenceId": body.referenceId,
-            "quantity": format(requested, "f"), "allocations": created,
-        }
-        with db() as c:
-            schema(c)
+            result = {
+                "status": "reserved", "allocationPolicy": "FEFO",
+                "productId": body.productId, "warehouseId": body.warehouseId,
+                "requestedQuantity": format(requested, "f"),
+                "referenceType": body.referenceType, "referenceId": body.referenceId,
+                "quantity": format(requested, "f"), "allocations": created,
+            }
             c.execute("INSERT INTO adv_fefo_allocations VALUES(?,?,?,?)",
                       (user, body.idempotencyKey, json.dumps(result, separators=(",", ":")), now))
         return result
