@@ -228,3 +228,25 @@ This section records code actually added on `feature/advanced-inventory-costing-
 - CI run results must be checked against the latest branch head before marking automated validation as passed.
 - Emulator tests are not physical Android-device acceptance.
 - No stable release, deployment, legal certification, or production-ready claim is authorized by this progress note.
+
+
+## 10. Inventory execution and order/cost linkage progress (2026-11-21)
+
+The following additional source implementation has been added on the feature branch. It is not production acceptance evidence:
+
+- `server/advanced_inventory_controls.py` adds FEFO multi-lot reservations. Eligible lots must be RELEASED and not expired; available quantity subtracts active reservations; ordering is expiry date first, with missing expiry dates last. The operation uses a single immediate transaction and idempotency keys.
+- Sales orders can reserve FEFO lots while DRAFT, then the existing order confirmation checks that advanced reservations cover every line instead of creating a second legacy reservation. Fulfillment posts lot-level `SHIPMENT_ISSUE` movements tied to the sales order and changes order state to SHIPPED.
+- The existing DELIVER transition recognizes advanced shipment movements and does not deduct the same stock a second time; it still posts the existing sales journal workflow.
+- Purchase-order receipt validates the received product quantities against the confirmed purchase order, creates supplier-linked lots in PENDING_INSPECTION, and changes the order state to RECEIVED.
+- Harvest records can be materialized as advanced inventory lots with `source_type=GREENHOUSE` and `source_id=harvest_id`, preserving the crop-cycle cost object link.
+- Order cost reconciliation joins shipment movements to harvest lots and the latest versioned crop-cost allocations. It returns provisional COGS only when all shipped lots have compatible cost links and shipment quantities reconcile; returns and missing cost links prevent a finalized profitability result.
+- Customer returns create a separate PENDING_INSPECTION lot; supplier returns, scrap and cycle-count adjustments remain approval-gated and append movement history.
+
+### Remaining controls and limits
+
+- The current approval header uses a server-side secret gate for CI/pilot scaffolding. It is not the required role-based maker-checker authorization and must not be treated as production-grade approval.
+- The order cost reconciliation is provisional management information. Discounts, freight, packaging adjustments, credit notes, tax, financial-period close and return disposition/revaluation are not yet fully reconciled.
+- FEFO order reservations and advanced order fulfillment need additional race, replay, partial-shipment, cancellation/release and cross-order stress tests.
+- Purchase receipts currently require the supplied received quantities to exactly match the confirmed order quantities; partial receipts/backorders are not yet implemented.
+- Lot split/merge/grade/pack genealogy, return disposition/rework, waste-to-crop-cost posting, stock-count variance thresholds, Android screens and bidirectional sync remain incomplete.
+- CI on the latest SHA, physical Android acceptance, LAN deployment and restore drills remain mandatory before any production claim.
