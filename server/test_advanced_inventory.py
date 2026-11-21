@@ -283,6 +283,10 @@ def test_customer_and_supplier_returns_require_approval_and_keep_ledger_history(
         "accountingAmount":"200","currency":"IRR"
     })
     assert supplier.status_code == 200
+    cross_return_replay = client.post(
+        f"/v2/erp/inventory/returns/{supplier.json()['documentId']}/approve",
+        headers=approval_headers, json={"idempotencyKey":"approve-customer-return-001"})
+    assert cross_return_replay.status_code == 409
     approved_supplier = client.post(
         f"/v2/erp/inventory/returns/{supplier.json()['documentId']}/approve",
         headers=approval_headers, json={"idempotencyKey":"approve-supplier-return-001"})
