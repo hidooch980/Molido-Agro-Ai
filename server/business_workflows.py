@@ -285,10 +285,15 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
                 state="SHIPPED"
             elif action=="DELIVER":
                 if order["order_type"]!="SALES" or state!="SHIPPED": raise HTTPException(409,"Sales order must be shipped before delivery")
-                for line in lines:
-                    c.execute("UPDATE inventory_balances SET quantity=quantity-?,updated_at=? WHERE user_id=? AND warehouse_id='main' AND product_id=? AND quantity>=?",(line["quantity"],now,user,line["productId"],line["quantity"]))
-                    if c.execute("SELECT changes()").fetchone()[0]!=1: raise HTTPException(409,"Stock changed; delivery rejected")
-                    c.execute("UPDATE order_reservations SET state='CONSUMED' WHERE user_id=? AND order_id=? AND product_id=? AND state='RESERVED'",(user,order_id,line["productId"]))
+                advanced_shipments=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='adv_stock_movements'").fetchone()
+                has_advanced_issue=False
+                if advanced_shipments:
+                    has_advanced_issue=c.execute("SELECT 1 FROM adv_stock_movements WHERE user_id=? AND reference_type='SALES_ORDER' AND reference_id=? AND movement_type='SHIPMENT_ISSUE' LIMIT 1",(user,order_id)).fetchone() is not None
+                if not has_advanced_issue:
+                    for line in lines:
+                        c.execute("UPDATE inventory_balances SET quantity=quantity-?,updated_at=? WHERE user_id=? AND warehouse_id='main' AND product_id=? AND quantity>=?",(line["quantity"],now,user,line["productId"],line["quantity"]))
+                        if c.execute("SELECT changes()").fetchone()[0]!=1: raise HTTPException(409,"Stock changed; delivery rejected")
+                        c.execute("UPDATE order_reservations SET state='CONSUMED' WHERE user_id=? AND order_id=? AND product_id=? AND state='RESERVED'",(user,order_id,line["productId"]))
                 state="DELIVERED"
                 _post_order_journal(c,user,order_id,order["total"],"SALES",now,encrypt_payload)
             elif action=="FULFILL":
