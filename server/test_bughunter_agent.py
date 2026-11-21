@@ -17,3 +17,21 @@ def test_autofix_is_disabled_by_default():
 def test_agent_has_no_release_or_data_mutation_capability():
  source=MODULE.read_text(encoding='utf-8')
  assert 'database_or_user_data_mutation' in source and 'merge_or_release_permission' in source
+
+def test_safe_autofix_rollback_restores_only_server_python_files(tmp_path, monkeypatch):
+ root = tmp_path
+ target = root / 'server' / 'sample.py'
+ target.parent.mkdir()
+ target.write_bytes(b'fixed = True\n')
+ monkeypatch.setattr(AGENT, 'ROOT', root)
+ restored = AGENT.rollback_safe_fixes({'server/sample.py': b'fixed = False\n'}, ['server/sample.py', '../outside.py', 'server/data.db'])
+ assert restored == ['server/sample.py']
+ assert target.read_bytes() == b'fixed = False\n'
+
+
+def test_safe_autofix_rollback_does_not_touch_unchanged_files(tmp_path, monkeypatch):
+ target = tmp_path / 'server' / 'same.py'
+ target.parent.mkdir()
+ target.write_bytes(b'value = 1\n')
+ monkeypatch.setattr(AGENT, 'ROOT', tmp_path)
+ assert AGENT.rollback_safe_fixes({'server/same.py': b'value = 1\n'}, ['server/same.py']) == []
