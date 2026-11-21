@@ -250,7 +250,11 @@ def register_business_workflow_routes(app, db, current_user, encrypt_payload, de
             init(c)
             c.execute("BEGIN IMMEDIATE")
             replay=c.execute("SELECT result FROM business_transition_keys WHERE user_id=? AND idempotency_key=?",(user,body.idempotencyKey)).fetchone()
-            if replay: return json.loads(replay["result"])
+            if replay:
+                previous=json.loads(replay["result"])
+                if previous.get("id") != order_id or previous.get("action") != body.action:
+                    raise HTTPException(409,"Idempotency key already belongs to a different order transition")
+                return previous
             order=c.execute("SELECT order_type,party_id,status,total,payload FROM business_orders WHERE user_id=? AND order_id=?",(user,order_id)).fetchone()
             if not order: raise HTTPException(404,"Order not found")
             payload=decrypt_payload(order["payload"]); lines=payload["lines"]; state=order["status"]; action=body.action
