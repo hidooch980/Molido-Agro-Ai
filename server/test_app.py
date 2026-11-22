@@ -27,8 +27,51 @@ def test_idempotency_and_conflict(tmp_path, monkeypatch):
     op={"idempotencyKey":"same-key","entityType":"inventory_item","entityId":"x","operation":"CREATE","payload":{"quantity":1},"baseVersion":0}
     assert c.post("/v1/sync/push",json={"operations":[op]},headers=h).json()["results"][0]["status"]=="applied"
     assert c.post("/v1/sync/push",json={"operations":[op]},headers=h).json()["results"][0]["status"]=="applied"
+    changed_same_key={**op,"payload":{"quantity":999}}
+    changed_result=c.post("/v1/sync/push",json={"operations":[changed_same_key]},headers=h).json()["results"][0]
+    assert changed_result["status"]=="conflict"
+    unchanged=c.post("/v1/sync/pull",json={"cursor":0},headers=h).json()["changes"]
+    assert unchanged[0]["payload"]["quantity"]==1
     stale={**op,"idempotencyKey":"stale-key","payload":{"quantity":2},"baseVersion":0}
     assert c.post("/v1/sync/push",json={"operations":[stale]},headers=h).json()["results"][0]["status"]=="conflict"
+
+def test_harvest_sync_accepts_current_and_legacy_entity_types(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DB_PATH", tmp_path / "harvest-sync.sqlite3")
+    app.init_db()
+    client = TestClient(app.app)
+    token = client.post("/v1/auth/register",json={
+        "username":"grower_harvest_sync","password":"strong-password-987"
+    }).json()["accessToken"]
+    headers = {"Authorization":f"Bearer {token}"}
+    for index, entity_type in enumerate(("harvest_batch", "harvest")):
+        operation = {
+            "idempotencyKey":f"harvest-sync-{index}",
+            "entityType":entity_type,
+            "entityId":f"harvest-{index}",
+            "operation":"CREATE",
+            "payload":{"quantity":12,"unit":"kg"},
+            "baseVersion":0,
+        }
+        response = client.post("/v1/sync/push",json={"operations":[operation]},headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["results"][0]["status"] == "applied"
+
+
+def test_operations_table_migrates_request_hash_without_losing_rows(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DB_PATH", tmp_path / "legacy-operations.sqlite3")
+    with app.db() as connection:
+        connection.execute("""CREATE TABLE operations(
+            user_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,result TEXT NOT NULL,
+            created_at INTEGER NOT NULL,PRIMARY KEY(user_id,idempotency_key)
+        )""")
+        connection.execute("INSERT INTO operations VALUES(?,?,?,?)",("legacy-user","legacy-key",'{"status":"applied"}',1))
+    app.init_db()
+    with app.db() as connection:
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(operations)").fetchall()}
+        legacy = connection.execute("SELECT result,request_hash FROM operations WHERE idempotency_key='legacy-key'").fetchone()
+    assert "request_hash" in columns
+    assert legacy["result"] == '{"status":"applied"}'
+    assert legacy["request_hash"] == ""
 
 def test_change_log_cursor_paginates_without_skipping_rows(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "DB_PATH", tmp_path / "cursor.sqlite3"); app.init_db()
@@ -215,17 +258,20 @@ def test_chirpstack_device_mapping_and_signed_uplink_ingestion(tmp_path, monkeyp
 
 def test_encrypted_sqlite_backup_and_restore_round_trip(tmp_path, monkeypatch):
     import base64, sqlite3, subprocess, sys
+    from pathlib import Path
     monkeypatch.setenv("MOLIDO_BACKUP_KEY", base64.urlsafe_b64encode(b"b" * 32).decode())
     original = tmp_path / "source.sqlite3"
     with sqlite3.connect(original) as connection:
         connection.execute("CREATE TABLE sample(value TEXT NOT NULL)")
         connection.execute("INSERT INTO sample(value) VALUES('backup-ok')")
     backup = tmp_path / "backup.sqlite3.enc"
+    backup_script = str(Path(__file__).resolve().parent / "backup_db.py")
+    restore_script = str(Path(__file__).resolve().parent / "restore_db.py")
     env = dict(os.environ, MOLIDO_DB_PATH=str(original))
-    subprocess.run([sys.executable, "backup_db.py", str(backup)], check=True, env=env, capture_output=True, text=True)
+    subprocess.run([sys.executable, backup_script, str(backup)], check=True, env=env, capture_output=True, text=True)
     restored = tmp_path / "restored.sqlite3"
     env["MOLIDO_DB_PATH"] = str(restored)
-    subprocess.run([sys.executable, "restore_db.py", str(backup)], check=True, env=env, capture_output=True, text=True)
+    subprocess.run([sys.executable, restore_script, str(backup)], check=True, env=env, capture_output=True, text=True)
     with sqlite3.connect(restored) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute("SELECT value FROM sample").fetchone()[0] == "backup-ok"

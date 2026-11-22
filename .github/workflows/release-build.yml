@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Explicitly approve publishing this signed APK as a GitHub Release"
+        required: true
+        type: boolean
+        default: false
 
 # Build and PR code receive read-only repository permissions.
 permissions:
@@ -118,6 +124,7 @@ jobs:
               "/v2/erp/costs/runs",
               "/v2/erp/costs/cycles/{crop_cycle_id}/entries",
               "/v2/erp/costs/cycles/{crop_cycle_id}/summary",
+              "/v1/ai/diagnose/disease",
           }
           missing = required.difference(schema.get("paths", {}))
           if missing:
@@ -353,7 +360,7 @@ jobs:
 
   publish-release:
     name: Publish signed release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'workflow_dispatch' && inputs.publish_release == true
     needs: [server-tests, android-instrumented-tests, assemble-release]
     runs-on: ubuntu-latest
     permissions:

@@ -15,10 +15,13 @@ import com.molido.agroai.data.BusinessLocalStore
 import com.molido.agroai.data.BusinessSyncScheduler
 import com.molido.agroai.data.SyncPayloadCipher
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collect
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+
+private const val LOCAL_BUSINESS_ACCOUNT_ID = "local-device"
 
 private val businessKinds = listOf(
     "CUSTOMER" to "مشتری",
@@ -32,7 +35,7 @@ private val businessKinds = listOf(
 )
 
 @Composable
-fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
+fun CrmErpPage(accountId: String?, legacyRecords: List<com.molido.agroai.data.BusinessRecordEntity>, onLegacySave: (String, String, String, Double) -> Unit, onNotice: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var selected by remember { mutableStateOf("CUSTOMER") }
@@ -48,34 +51,44 @@ fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
     var description by remember { mutableStateOf("") }
     var quantity by remember { mutableStateOf("1") }
     var price by remember { mutableStateOf("0") }
+    var showLegacyRecords by remember { mutableStateOf(false) }
 
     LaunchedEffect(accountId) {
         records = emptyList()
-        if (!accountId.isNullOrBlank()) {
-            BusinessLocalStore.get(context).businessDao().observe(accountId).collect { records = it }
+        val dao = BusinessLocalStore.get(context).businessDao()
+        val localRecords = dao.observe(LOCAL_BUSINESS_ACCOUNT_ID)
+        if (accountId.isNullOrBlank()) {
+            localRecords.collect { records = it }
+        } else {
+            combine(dao.observe(accountId), localRecords) { accountRecords, deviceRecords ->
+                (accountRecords + deviceRecords).sortedByDescending { it.createdAtEpochMillis }
+            }.collect { records = it }
         }
     }
 
     fun persist(type: String, payload: JSONObject) {
-        val uid = accountId
-        if (uid.isNullOrBlank()) {
-            onNotice("برای ثبت اطلاعات CRM و ERP ابتدا وارد حساب کاربری شوید.")
-            return
-        }
+        val signedInAccount = accountId?.takeIf { it.isNotBlank() }
+        val storageAccount = signedInAccount ?: LOCAL_BUSINESS_ACCOUNT_ID
         scope.launch {
             runCatching {
                 val entityId = UUID.randomUUID().toString()
                 val dao = BusinessLocalStore.get(context).businessDao()
                 dao.put(BusinessLocalRecord(
                     id = UUID.randomUUID().toString(),
-                    accountId = uid,
+                    accountId = storageAccount,
                     entityType = type,
                     entityId = entityId,
-                    encryptedPayload = SyncPayloadCipher.encrypt(context, payload.put("id", entityId).toString())
+                    encryptedPayload = SyncPayloadCipher.encrypt(context, payload.put("id", entityId).toString()),
+                    syncState = if (signedInAccount == null) "LOCAL_ONLY" else "PENDING"
                 ))
-                BusinessSyncScheduler.enqueue(context)
+                if (signedInAccount != null) BusinessSyncScheduler.enqueue(context)
             }.onSuccess {
-                onNotice("اطلاعات به‌صورت محلی و رمزگذاری‌شده ذخیره شد؛ همگام‌سازی در صف قرار گرفت.")
+                onNotice(
+                    if (signedInAccount == null)
+                        "اطلاعات رمزگذاری‌شده فقط روی این دستگاه ذخیره شد؛ حساب کاربری لازم نیست."
+                    else
+                        "اطلاعات محلی ذخیره شد؛ همگام‌سازی حساب در صف قرار گرفت."
+                )
                 name = ""; phone = ""; subject = ""; description = ""
             }.onFailure {
                 onNotice("ذخیره اطلاعات ناموفق بود: " + (it.message ?: "خطای نامشخص"))
@@ -83,20 +96,28 @@ fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
         }
     }
 
+    if (showLegacyRecords) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            TextButton(onClick = { showLegacyRecords = false }) { Text("بازگشت به CRM/ERP") }
+            BusinessPage(legacyRecords, onLegacySave)
+        }
+    } else {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        TextButton(onClick = { showLegacyRecords = true }) { Text("سوابق عمومی قدیمی") }
         Text("مدیریت مشتری و کسب‌وکار", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Text("ثبت آفلاین با رمزگذاری محلی؛ ارسال خودکار پس از اتصال امن به سرور", style = MaterialTheme.typography.bodySmall)
+        Text(if (accountId.isNullOrBlank()) "ثبت محلی رمزگذاری‌شده؛ بدون نیاز به حساب" else "ثبت آفلاین با رمزگذاری محلی؛ ارسال خودکار پس از اتصال امن به سرور", style = MaterialTheme.typography.bodySmall)
         if (accountId.isNullOrBlank()) {
             Card(shape = RoundedCornerShape(14.dp)) {
-                Text("برای نگهداری اطلاعات خصوصی، ابتدا وارد حساب شوید.", modifier = Modifier.padding(16.dp))
+                Text("حالت محلی بدون حساب فعال است؛ اطلاعات رمزگذاری‌شده فقط روی همین دستگاه ذخیره می‌شود.", modifier = Modifier.padding(16.dp))
             }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("در انتظار همگام‌سازی: " + records.count { it.syncState == "PENDING" }, style = MaterialTheme.typography.labelLarge)
+                Text("در انتظار همگام‌سازی: " + records.count { it.accountId == accountId && it.syncState == "PENDING" }, style = MaterialTheme.typography.labelLarge)
                 Text("•", color = MaterialTheme.colorScheme.primary)
-                Text("تعارض: " + records.count { it.syncState == "CONFLICT" }, style = MaterialTheme.typography.labelLarge)
+                Text("تعارض: " + records.count { it.accountId == accountId && it.syncState == "CONFLICT" }, style = MaterialTheme.typography.labelLarge)
             }
-            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        }
+        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 businessKinds.forEach { (key, title) ->
                     FilterChip(selected = selected == key, onClick = { selected = key }, label = { Text(title) })
                 }
@@ -166,7 +187,7 @@ fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
                     Button(onClick = {
                         val q = quantity.toDoubleOrNull()
                         if (greenhouseId.isBlank() || cropCycleId.isBlank() || productId.isBlank() || q == null || q <= 0) onNotice("شناسه گلخانه، دوره کشت، محصول و مقدار برداشت را بررسی کنید.")
-                        else persist("harvest", JSONObject().put("greenhouseId", greenhouseId.trim()).put("cropCycleId", cropCycleId.trim()).put("productId", productId.trim()).put("warehouseId", "main").put("quantity", q).put("unit", unit))
+                        else persist("harvest_batch", JSONObject().put("greenhouseId", greenhouseId.trim()).put("cropCycleId", cropCycleId.trim()).put("productId", productId.trim()).put("warehouseId", "main").put("quantity", q).put("unit", unit))
                     }, modifier = Modifier.fillMaxWidth()) { Text("ثبت برداشت محلی") }
                 }
                 "SALES_ORDER" -> {
@@ -187,13 +208,13 @@ fun CrmErpPage(accountId: String?, onNotice: (String) -> Unit) {
                 val data = runCatching { JSONObject(SyncPayloadCipher.decrypt(record.encryptedPayload)) }.getOrNull()
                 Card(shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(businessKinds.firstOrNull { it.first == record.entityType.uppercase() }?.second ?: record.entityType, fontWeight = FontWeight.SemiBold)
+                        Text(businessKinds.firstOrNull { it.first == record.entityType.uppercase() }?.second ?: when (record.entityType) { "harvest_batch" -> "برداشت"; "support_ticket" -> "درخواست پشتیبانی"; else -> record.entityType }, fontWeight = FontWeight.SemiBold)
                         Text(data?.optString("name").takeUnless { it.isNullOrBlank() } ?: data?.optString("title").takeUnless { it.isNullOrBlank() } ?: data?.optString("subject").takeUnless { it.isNullOrBlank() } ?: record.entityId)
                         Text("شناسه: " + record.entityId, style = MaterialTheme.typography.labelSmall)
-                        Text("وضعیت همگام‌سازی: " + when (record.syncState) { "SYNCED" -> "ارسال‌شده"; "CONFLICT" -> "نیازمند بررسی تعارض"; else -> "در صف ارسال" }, style = MaterialTheme.typography.labelSmall)
+                        Text("وضعیت همگام‌سازی: " + when (record.syncState) { "SYNCED" -> "ارسال‌شده"; "CONFLICT" -> "نیازمند بررسی تعارض"; "LOCAL_ONLY" -> "فقط روی این دستگاه"; else -> "در صف ارسال" }, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
-        }
+    }
     }
 }

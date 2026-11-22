@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import os
 import sqlite3
 import sys
@@ -43,7 +44,7 @@ def main() -> None:
         staged = Path(handle.name)
         handle.write(plain)
     try:
-        with sqlite3.connect(staged) as connection:
+        with contextlib.closing(sqlite3.connect(staged)) as connection:
             result = connection.execute("PRAGMA integrity_check").fetchone()[0]
             if result != "ok":
                 raise SystemExit(f"Restored SQLite integrity check failed: {result}")

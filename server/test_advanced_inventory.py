@@ -1,10 +1,11 @@
 import base64
 import os
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
 
-DB = Path("/tmp/molido-advanced-inventory-tests.sqlite3")
+DB = Path(tempfile.gettempdir()) / "molido-advanced-inventory-tests.sqlite3"
 if DB.exists():
     DB.unlink()
 os.environ["MOLIDO_JWT_SECRET"] = "advanced-inventory-test-secret-minimum-32"

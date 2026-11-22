@@ -2,9 +2,10 @@ import base64
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import tempfile
 import uuid
 
-DB = Path("/tmp/molido-business-settlement-tests.sqlite3")
+DB = Path(tempfile.gettempdir()) / "molido-business-settlement-tests.sqlite3"
 if DB.exists():
     DB.unlink()
 os.environ["MOLIDO_JWT_SECRET"] = "business-settlement-test-secret-minimum-32"

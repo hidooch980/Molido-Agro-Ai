@@ -1,8 +1,9 @@
 import base64
 import os
 from pathlib import Path
+import tempfile
 
-DB = Path("/tmp/molido-production-costing-tests.sqlite3")
+DB = Path(tempfile.gettempdir()) / "molido-production-costing-tests.sqlite3"
 if DB.exists():
     DB.unlink()
 os.environ["MOLIDO_JWT_SECRET"] = "production-costing-test-secret-minimum-32"

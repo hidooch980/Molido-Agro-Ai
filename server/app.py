@@ -39,9 +39,12 @@ def init_db():
         c.executescript("""
         CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, salt BLOB NOT NULL, password_hash BLOB NOT NULL, created_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS records(user_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, payload TEXT NOT NULL, version INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id,entity_type,entity_id), FOREIGN KEY(user_id) REFERENCES users(id));
-        CREATE TABLE IF NOT EXISTS operations(user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, result TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(user_id,idempotency_key), FOREIGN KEY(user_id) REFERENCES users(id));
+        CREATE TABLE IF NOT EXISTS operations(user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, result TEXT NOT NULL, created_at INTEGER NOT NULL, request_hash TEXT NOT NULL DEFAULT '', PRIMARY KEY(user_id,idempotency_key), FOREIGN KEY(user_id) REFERENCES users(id));
         CREATE TABLE IF NOT EXISTS change_log(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, payload TEXT NOT NULL, version INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id));
         """)
+        operation_columns = {row["name"] for row in c.execute("PRAGMA table_info(operations)").fetchall()}
+        if "request_hash" not in operation_columns:
+            c.execute("ALTER TABLE operations ADD COLUMN request_hash TEXT NOT NULL DEFAULT ''")
 init_db()
 
 def b64(data: bytes) -> str: return base64.urlsafe_b64encode(data).decode().rstrip("=")
@@ -75,7 +78,7 @@ class Credentials(BaseModel):
     password: str = Field(min_length=12,max_length=256)
 class Operation(BaseModel):
     idempotencyKey: str = Field(min_length=1,max_length=200)
-    entityType: Literal["greenhouse", "crop_cycle", "farm_activity", "inventory_item", "financial_entry", "customer", "supplier", "product", "sales_order", "purchase_order", "inventory_movement", "crm_activity", "crm_lead", "crm_followup", "support_ticket", "inventory_reservation", "harvest_batch", "journal_entry", "settlement"]
+    entityType: Literal["greenhouse", "crop_cycle", "farm_activity", "inventory_item", "financial_entry", "customer", "supplier", "product", "sales_order", "purchase_order", "inventory_movement", "crm_activity", "crm_lead", "crm_followup", "support_ticket", "inventory_reservation", "harvest", "harvest_batch", "journal_entry", "settlement"]
     entityId: str = Field(min_length=1,max_length=200)
     operation: str = Field(pattern=r"^(CREATE|UPDATE|DELETE)$")
     payload: dict[str,Any] = Field(default_factory=dict)
@@ -111,9 +114,27 @@ def push(body: PushBody, authorization: str | None = Header(default=None)):
     uid=current_user(authorization); results=[]
     with db() as c:
         for op in body.operations:
-            old=c.execute("SELECT result FROM operations WHERE user_id=? AND idempotency_key=?",(uid,op.idempotencyKey)).fetchone()
+            request_payload = {
+                "entityType": op.entityType,
+                "entityId": op.entityId,
+                "operation": op.operation,
+                "payload": op.payload,
+                "baseVersion": op.baseVersion,
+            }
+            request_hash = hashlib.sha256(
+                json.dumps(request_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+            ).hexdigest()
+            old=c.execute("SELECT result,request_hash FROM operations WHERE user_id=? AND idempotency_key=?",(uid,op.idempotencyKey)).fetchone()
             if old:
-                results.append(json.loads(old["result"])); continue
+                if old["request_hash"] and not hmac.compare_digest(old["request_hash"], request_hash):
+                    results.append({
+                        "idempotencyKey": op.idempotencyKey,
+                        "status": "conflict",
+                        "reason": "Idempotency key reused with a different request",
+                    })
+                else:
+                    results.append(json.loads(old["result"]))
+                continue
             current=c.execute("SELECT version FROM records WHERE user_id=? AND entity_type=? AND entity_id=?",(uid,op.entityType,op.entityId)).fetchone()
             version=current["version"] if current else 0
             if version != op.baseVersion:
@@ -126,7 +147,7 @@ def push(body: PushBody, authorization: str | None = Header(default=None)):
                 c.execute("INSERT INTO records VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,entity_type,entity_id) DO UPDATE SET payload=excluded.payload,version=excluded.version,updated_at=excluded.updated_at,deleted=excluded.deleted",(uid,op.entityType,op.entityId,payload,next_version,updated_at,deleted))
                 c.execute("INSERT INTO change_log(user_id,entity_type,entity_id,payload,version,updated_at,deleted) VALUES(?,?,?,?,?,?,?)",(uid,op.entityType,op.entityId,payload,next_version,updated_at,deleted))
                 result={"idempotencyKey":op.idempotencyKey,"status":"applied","serverVersion":next_version}
-            c.execute("INSERT INTO operations VALUES(?,?,?,?)",(uid,op.idempotencyKey,json.dumps(result),int(time.time())))
+            c.execute("INSERT INTO operations(user_id,idempotency_key,result,created_at,request_hash) VALUES(?,?,?,?,?)",(uid,op.idempotencyKey,json.dumps(result),int(time.time()),request_hash))
             results.append(result)
     return {"results":results}
 
@@ -172,3 +193,6 @@ register_production_costing_routes(app, db, current_user, decrypt_payload)
 
 from advanced_inventory_controls import register_advanced_inventory_control_routes
 register_advanced_inventory_control_routes(app, db, current_user, decrypt_payload, encrypt_payload)
+
+from ai_diagnostics_api import register_ai_diagnostics_routes
+register_ai_diagnostics_routes(app, db, current_user, decrypt_payload)

@@ -1,9 +1,10 @@
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import os
+import tempfile
 from pathlib import Path
 
-TEST_DB = Path("/tmp/molido-crm-erp-tests.sqlite3")
+TEST_DB = Path(tempfile.gettempdir()) / "molido-crm-erp-tests.sqlite3"
 if TEST_DB.exists():
     TEST_DB.unlink()
 os.environ["MOLIDO_JWT_SECRET"] = "crm-erp-test-secret-with-at-least-32-characters"

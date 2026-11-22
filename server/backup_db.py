@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import os
 import secrets
 import sqlite3
@@ -34,7 +35,7 @@ def main() -> None:
         raise SystemExit(f"Database does not exist: {source}")
     with tempfile.TemporaryDirectory(prefix="molido-backup-") as directory:
         snapshot = Path(directory) / "snapshot.sqlite3"
-        with sqlite3.connect(source) as src, sqlite3.connect(snapshot) as dst:
+        with contextlib.closing(sqlite3.connect(source)) as src, contextlib.closing(sqlite3.connect(snapshot)) as dst:
             src.backup(dst)
             result = dst.execute("PRAGMA integrity_check").fetchone()[0]
             if result != "ok":

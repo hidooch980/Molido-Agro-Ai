@@ -15,3 +15,11 @@ local.properties
 # Self-hosted API local secrets and data
 server/.venv/
 server/*.sqlite3
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+artifacts/
+.pytest_cache/
