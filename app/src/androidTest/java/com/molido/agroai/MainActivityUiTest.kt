@@ -20,19 +20,21 @@ class MainActivityUiTest {
         composeRule.onNodeWithText("گلخانه").assertIsDisplayed()
         composeRule.onNodeWithText("مدیریت هوشمند کشاورزی و گلخانه").assertIsDisplayed()
     }
-    
+
     @Test
     fun createAccountButtonShowsValidationInsteadOfAppearingUnresponsive() {
         composeRule.onNodeWithText("ساخت حساب").performScrollTo().performClick()
-        composeRule.onNodeWithText("نام کاربری باید ۳ تا ۶۴ نویسه", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("نام کاربری باید ۳ تا ۶۴ نویسه", substring = true)
+            .performScrollTo().assertIsDisplayed()
     }
 
     @Test
     fun crmErpWorkspaceIsAvailableInPersianNavigation() {
         composeRule.onNodeWithText("CRM/ERP").performClick()
-        composeRule.onNodeWithText("مدیریت مشتری و کسب‌وکار").assertIsDisplayed()
-        composeRule.onNodeWithText("حالت محلی بدون حساب فعال است", substring = true).assertIsDisplayed()
-        composeRule.onNodeWithText("ثبت مشتری").assertIsDisplayed()
+        composeRule.onNodeWithText("مدیریت مشتری و کسب‌وکار").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("حالت محلی بدون حساب فعال است", substring = true)
+            .performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("ثبت مشتری").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -40,14 +42,16 @@ class MainActivityUiTest {
         composeRule.onNodeWithText("CRM/ERP").performClick()
         composeRule.onNodeWithText("نام مشتری").performScrollTo().performTextInput("مشتری محلی آزمایشی")
         composeRule.onNodeWithText("ثبت مشتری").performScrollTo().performClick()
-        composeRule.onNodeWithText("اطلاعات رمزگذاری‌شده فقط روی این دستگاه ذخیره شد", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("اطلاعات رمزگذاری‌شده فقط روی این دستگاه ذخیره شد", substring = true)
+            .performScrollTo().assertIsDisplayed()
     }
 
     @Test
     fun legacyBusinessRecordsRemainReachable() {
         composeRule.onNodeWithText("CRM/ERP").performClick()
-        composeRule.onNodeWithText("سوابق عمومی قدیمی").performClick()
-        composeRule.onNodeWithText("مدیریت یکپارچه CRM و ERP").assertIsDisplayed()
-        composeRule.onNodeWithText("ذخیره محلی و افزودن به صف همگام‌سازی").assertIsDisplayed()
+        composeRule.onNodeWithText("سوابق عمومی قدیمی").performScrollTo().performClick()
+        composeRule.onNodeWithText("مدیریت یکپارچه CRM و ERP").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("ذخیره محلی و افزودن به صف همگام‌سازی")
+            .performScrollTo().assertIsDisplayed()
     }
 }
