@@ -1,0 +1,37 @@
+name: Validate Molido Agro AI Website (No Deployment)
+
+on:
+  push:
+    branches: [main, foundation/android-release-foundation]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-validation
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate website files
+        run: |
+          test -s site/index.html
+          grep -q '<html lang="fa" dir="rtl">' site/index.html
+          grep -q 'Molido Agro AI' site/index.html
+      - name: Upload website preview artifact (not published)
+        uses: actions/upload-artifact@v4
+        with:
+          name: molido-agro-website-preview
+          path: site
+          if-no-files-found: error
+          retention-days: 7
