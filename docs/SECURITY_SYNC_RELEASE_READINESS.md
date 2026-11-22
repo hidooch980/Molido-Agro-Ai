@@ -9,7 +9,7 @@
 - Server-side AES-256-GCM encryption for record/change-log payloads; the operator must supply and safely back up `MOLIDO_DATA_KEY`.
 - One-account-per-local-database binding. A second account is blocked to prevent one device's unpartitioned local records from being exposed to another account.
 - Optimistic server version checks, conflict inbox, and explicit user choice to accept server data or re-submit local data against the current server version.
-- Additive Room migrations through version 6; Android instrumentation test now exercises the migration chain from version 1 through 6 and checks preservation of a legacy observation and outbox row.
+- Additive Room migrations through version 7; Android instrumentation test exercises migration steps from version 1 through 7 and checks preservation of a legacy observation and outbox row. The test currently invokes migration functions directly; opening a historical database through Room's full migration mechanism remains a separate acceptance item.
 - Backend tests cover account isolation, idempotency, stale-version conflicts and change-log pagination.
 - Transactional helpers exist for CREATE, UPDATE and DELETE/tombstone outbox operations.
 
