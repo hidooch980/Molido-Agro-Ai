@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BACKUP_SCRIPT = ROOT / "server" / "backup_db.py"
 RESTORE_SCRIPT = ROOT / "server" / "restore_db.py"
-BACKUP_KEY = base64.urlsafe_b64encode(b"molido-backup-test-key-32-bytes!!").decode().rstrip("=")
+BACKUP_KEY = base64.urlsafe_b64encode(b"molido-backup-test-key-32-bytes!").decode().rstrip("=")
 
 
 def run_script(script: Path, argument: Path, database: Path, key: str = BACKUP_KEY):
