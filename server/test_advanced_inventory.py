@@ -581,3 +581,94 @@ def test_reservation_idempotency_keys_cannot_be_reused_for_different_requests_or
         json={"idempotencyKey": "reservation-action-key-01", "action": "RELEASE"},
     )
     assert reused_for_other_reservation.status_code == 409
+
+
+def test_sales_order_fefo_idempotency_keys_are_bound_to_order_and_action():
+    h = account("salesorderfefoidempotency")
+    customer = client.post("/v1/crm/customers", headers=h, json={"name":"FEFO Replay Customer"})
+    p = product(h, "CUC-SALES-FEFO-REPLAY")
+    w = warehouse(h, "SALES-FEFO-REPLAY")
+    first_order = client.post("/v1/erp/sales/orders", headers=h, json={
+        "partyId": customer.json()["id"],
+        "lines": [{"productId": p, "quantity": 2, "unitPrice": 100}],
+    })
+    second_order = client.post("/v1/erp/sales/orders", headers=h, json={
+        "partyId": customer.json()["id"],
+        "lines": [{"productId": p, "quantity": 2, "unitPrice": 100}],
+    })
+    assert first_order.status_code == 200, first_order.text
+    assert second_order.status_code == 200, second_order.text
+
+    received = lot(h, p, w, "fefo-replay-lot-001", "FEFO-REPLAY-LOT", "8")
+    release(h, received["lotId"])
+    first_id = first_order.json()["id"]
+    second_id = second_order.json()["id"]
+
+    reserve_key = "fefo-order-reserve-replay-01"
+    reserve_body = {"idempotencyKey": reserve_key, "warehouseId": w}
+    first_reserve = client.post(
+        f"/v2/erp/inventory/orders/{first_id}/fefo-reservations",
+        headers=h, json=reserve_body,
+    )
+    assert first_reserve.status_code == 200, first_reserve.text
+    same_order_replay = client.post(
+        f"/v2/erp/inventory/orders/{first_id}/fefo-reservations",
+        headers=h, json=reserve_body,
+    )
+    assert same_order_replay.status_code == 200
+    assert same_order_replay.json() == first_reserve.json()
+
+    cross_order_replay = client.post(
+        f"/v2/erp/inventory/orders/{second_id}/fefo-reservations",
+        headers=h, json=reserve_body,
+    )
+    assert cross_order_replay.status_code == 409, cross_order_replay.text
+
+    confirm_first = client.post(
+        f"/v1/erp/orders/{first_id}/transition", headers=h,
+        json={"action": "CONFIRM", "idempotencyKey": "fefo-order-confirm-replay-01"},
+    )
+    assert confirm_first.status_code == 200, confirm_first.text
+
+    cross_action_replay = client.post(
+        f"/v2/erp/inventory/orders/{first_id}/fulfill",
+        headers=h, json={"idempotencyKey": reserve_key},
+    )
+    assert cross_action_replay.status_code == 409, cross_action_replay.text
+
+    fulfill_key = "fefo-order-fulfill-replay-01"
+    first_fulfill = client.post(
+        f"/v2/erp/inventory/orders/{first_id}/fulfill",
+        headers=h, json={"idempotencyKey": fulfill_key},
+    )
+    assert first_fulfill.status_code == 200, first_fulfill.text
+    same_fulfill_replay = client.post(
+        f"/v2/erp/inventory/orders/{first_id}/fulfill",
+        headers=h, json={"idempotencyKey": fulfill_key},
+    )
+    assert same_fulfill_replay.status_code == 200
+    assert same_fulfill_replay.json() == first_fulfill.json()
+
+    reserve_second = client.post(
+        f"/v2/erp/inventory/orders/{second_id}/fefo-reservations",
+        headers=h, json={"idempotencyKey": "fefo-order-reserve-replay-02", "warehouseId": w},
+    )
+    assert reserve_second.status_code == 200, reserve_second.text
+    confirm_second = client.post(
+        f"/v1/erp/orders/{second_id}/transition", headers=h,
+        json={"action": "CONFIRM", "idempotencyKey": "fefo-order-confirm-replay-02"},
+    )
+    assert confirm_second.status_code == 200, confirm_second.text
+    cross_order_fulfill_replay = client.post(
+        f"/v2/erp/inventory/orders/{second_id}/fulfill",
+        headers=h, json={"idempotencyKey": fulfill_key},
+    )
+    assert cross_order_fulfill_replay.status_code == 409, cross_order_fulfill_replay.text
+
+    trace = client.get(f"/v2/erp/inventory/lots/{received['lotId']}/trace", headers=h).json()
+    issued = sum(
+        Decimal(item["quantity"])
+        for item in trace["movements"]
+        if item["type"] == "SHIPMENT_ISSUE"
+    )
+    assert issued == Decimal("2")
