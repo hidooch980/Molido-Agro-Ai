@@ -552,9 +552,12 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            replay=c.execute("SELECT result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
+            replay=c.execute("SELECT reservation_id,action,result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
                              (user,body.idempotencyKey)).fetchone()
-            if replay: return json.loads(replay["result"])
+            if replay:
+                if replay["action"] != "ORDER_FEFO_RESERVE" or replay["reservation_id"] != order_id:
+                    raise HTTPException(409,"Idempotency key already belongs to a different action or order")
+                return json.loads(replay["result"])
             order=c.execute("SELECT order_type,status,payload FROM business_orders WHERE user_id=? AND order_id=?",
                             (user,order_id)).fetchone()
             if not order: raise HTTPException(404,"Sales order not found in this account")
@@ -604,9 +607,12 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
-            replay=c.execute("SELECT result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
+            replay=c.execute("SELECT reservation_id,action,result FROM adv_reservation_actions WHERE user_id=? AND idempotency_key=?",
                              (user,body.idempotencyKey)).fetchone()
-            if replay: return json.loads(replay["result"])
+            if replay:
+                if replay["action"] != "ORDER_FULFILL" or replay["reservation_id"] != order_id:
+                    raise HTTPException(409,"Idempotency key already belongs to a different action or order")
+                return json.loads(replay["result"])
             order=c.execute("SELECT order_type,status FROM business_orders WHERE user_id=? AND order_id=?",
                             (user,order_id)).fetchone()
             if not order: raise HTTPException(404,"Sales order not found in this account")
