@@ -2,6 +2,7 @@ package com.molido.agroai
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -42,7 +43,17 @@ class MainActivityUiTest {
         composeRule.onNodeWithText("CRM/ERP").performClick()
         composeRule.onNodeWithText("نام مشتری").performScrollTo().performTextInput("مشتری محلی آزمایشی")
         composeRule.onNodeWithText("ثبت مشتری").performScrollTo().performClick()
-        composeRule.onNodeWithText("اطلاعات رمزگذاری‌شده فقط روی این دستگاه ذخیره شد", substring = true)
+        val successNotice = "اطلاعات رمزگذاری‌شده فقط روی این دستگاه ذخیره شد"
+        val failureNotice = "ذخیره اطلاعات ناموفق بود"
+        // Local persistence runs in a coroutine; wait for its observable result rather than
+        // asserting before Room/Keystore work has completed.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText(successNotice, substring = true)
+                .fetchSemanticsNodes().isNotEmpty() ||
+                composeRule.onAllNodesWithText(failureNotice, substring = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText(successNotice, substring = true)
             .performScrollTo().assertIsDisplayed()
     }
 
