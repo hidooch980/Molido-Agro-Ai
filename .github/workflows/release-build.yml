@@ -137,7 +137,8 @@ jobs:
   android-instrumented-tests:
     name: Android migration tests on emulator
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # Two bounded attempts fit inside this budget when the software-emulated device crashes.
+    timeout-minutes: 90
     env:
       # GitHub-hosted Linux VMs may not expose KVM; explicitly permit QEMU TCG fallback.
       ANDROID_I_WANT_MY_TCG: 'yes'
@@ -157,7 +158,7 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_2
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -memory 3072
           emulator-boot-timeout: 1800
           disable-animations: true
           script: bash .github/scripts/run-android-instrumentation.sh

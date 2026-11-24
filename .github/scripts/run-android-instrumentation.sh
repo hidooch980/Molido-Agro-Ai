@@ -96,4 +96,22 @@ for setting in window_animation_scale transition_animation_scale animator_durati
 done
 
 echo "Emulator services are ready; starting instrumentation tests."
-timeout --signal=TERM --kill-after=30s 45m gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest 2>&1 | tee "$DIAG_DIR/molido-instrumentation-gradle.log"
+LOG="$DIAG_DIR/molido-instrumentation-gradle.log"
+# A software-emulated (TCG) device occasionally kills the instrumentation process itself.
+# Such a crash is retried once so the job reports the test suite, not the hypervisor; a real
+# assertion failure fails both attempts and still fails the job.
+status=1
+for attempt in 1 2; do
+  if [[ "$attempt" -gt 1 ]]; then
+    echo "::warning::Instrumentation attempt $((attempt - 1)) failed; retrying once on the same emulator."
+    mv "$LOG" "$DIAG_DIR/molido-instrumentation-gradle.attempt$((attempt - 1)).log"
+  fi
+  set +e
+  timeout --signal=TERM --kill-after=30s 25m gradle --no-daemon --console=plain --stacktrace :app:connectedDebugAndroidTest 2>&1 | tee "$LOG"
+  status=${PIPESTATUS[0]}
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    break
+  fi
+done
+exit "$status"
