@@ -57,12 +57,11 @@ private fun AgroApp() {
         BusinessSyncScheduler.enqueue(context)
         // Keystore decryption and the first Room query must never run on the UI thread: on a
         // cold device that combination is slow enough to be flagged as an ANR.
-        val loaded = withContext(Dispatchers.IO) {
-            SessionStore(context).userId() to db.appMetadataDao().value("bound_account_id")
-        }
-        currentUser = loaded.first
-        boundAccount = loaded.second
+        // The fast local check gates the UI, so the workspace is never hidden behind the
+        // comparatively slow Keystore round trip.
+        boundAccount = withContext(Dispatchers.IO) { db.appMetadataDao().value("bound_account_id") }
         accountStateLoaded = true
+        currentUser = withContext(Dispatchers.IO) { SessionStore(context).userId() }
     }
     val greenhouses by db.greenhouseDao().observeAll().collectAsState(initial = emptyList())
     val cycles by db.cropCycleDao().observeAll().collectAsState(initial = emptyList())
