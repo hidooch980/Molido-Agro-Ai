@@ -42,8 +42,14 @@ class MainActivityUiTest {
         composeRule.onNodeWithText("CRM/ERP").performClick()
         composeRule.onNodeWithText("نام مشتری").performScrollTo().performTextInput("مشتری محلی آزمایشی")
         composeRule.onNodeWithText("ثبت مشتری").performScrollTo().performClick()
-        composeRule.onNodeWithText("اطلاعات رمزگذاری‌شده فقط روی این دستگاه ذخیره شد", substring = true)
-            .performScrollTo().assertIsDisplayed()
+        // The save runs on a background dispatcher and the record list reflows when the row lands,
+        // so poll until the confirmation is both present and on screen instead of racing one frame.
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            runCatching {
+                composeRule.onNodeWithText("اطلاعات رمزگذاری‌شده فقط روی این دستگاه ذخیره شد", substring = true)
+                    .performScrollTo().assertIsDisplayed()
+            }.isSuccess
+        }
     }
 
     @Test
