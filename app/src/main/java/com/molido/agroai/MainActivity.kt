@@ -49,13 +49,19 @@ private fun AgroApp() {
     val db = remember(context) { AgroDatabaseProvider.get(context) }
     val scope = rememberCoroutineScope()
     var authRevision by remember { mutableIntStateOf(0) }
-    var currentUser by remember { mutableStateOf(SessionStore(context).userId()) }
+    var currentUser by remember { mutableStateOf<String?>(null) }
     var boundAccount by remember { mutableStateOf<String?>(null) }
     var accountStateLoaded by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         SyncScheduler.schedule(context)
         BusinessSyncScheduler.enqueue(context)
-        boundAccount = db.appMetadataDao().value("bound_account_id")
+        // Keystore decryption and the first Room query must never run on the UI thread: on a
+        // cold device that combination is slow enough to be flagged as an ANR.
+        val loaded = withContext(Dispatchers.IO) {
+            SessionStore(context).userId() to db.appMetadataDao().value("bound_account_id")
+        }
+        currentUser = loaded.first
+        boundAccount = loaded.second
         accountStateLoaded = true
     }
     val greenhouses by db.greenhouseDao().observeAll().collectAsState(initial = emptyList())
@@ -84,8 +90,10 @@ private fun AgroApp() {
             UpdateCheckerCard()
             AuthPanel(context) {
                 authRevision += 1
-                currentUser = SessionStore(context).userId()
-                scope.launch { boundAccount = db.appMetadataDao().value("bound_account_id") }
+                scope.launch {
+                    currentUser = withContext(Dispatchers.IO) { SessionStore(context).userId() }
+                    boundAccount = db.appMetadataDao().value("bound_account_id")
+                }
             }
             if (!accountStateLoaded) {
                 PanelCard("در حال بررسی وضعیت امنیت حساب...")
@@ -159,7 +167,11 @@ private fun AuthPanel(context: android.content.Context, onAuthChanged: () -> Uni
     val session = remember(context) { SessionStore(context) }
     var user by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf(session.userId()?.let { "حساب متصل: $it" } ?: "برای همگام‌سازی، وارد حساب شوید یا حساب بسازید.") }
+    var status by remember { mutableStateOf("در حال بررسی وضعیت حساب…") }
+    LaunchedEffect(session) {
+        status = withContext(Dispatchers.IO) { session.userId() }
+            ?.let { "حساب متصل: $it" } ?: "برای همگام‌سازی، وارد حساب شوید یا حساب بسازید."
+    }
     var busy by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
         Text(status, color = Muted, style = MaterialTheme.typography.bodySmall)

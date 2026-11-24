@@ -15,6 +15,13 @@ class SessionStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("molido_secure_session", Context.MODE_PRIVATE)
     private val alias = "molido.session.aes.v1"
 
+    /**
+     * Keystore decrypt operations can take seconds on a cold, software-emulated device, so a
+     * decrypted value is remembered for the life of the process. Every read from the UI thread
+     * after the first one is therefore a plain map lookup.
+     */
+    private fun cache(): MutableMap<String, String> = cachedSecrets
+
     fun saveAccessToken(token: String) = saveSecret("access_token", token)
     fun saveUserId(userId: String) = saveSecret("user_id", userId)
     fun saveSession(token: String, userId: String) {
@@ -24,7 +31,10 @@ class SessionStore(context: Context) {
     }
     fun accessToken(): String? = readSecret("access_token")
     fun userId(): String? = readSecret("user_id")
-    fun clear() { prefs.edit().clear().apply() }
+    fun clear() {
+        prefs.edit().clear().apply()
+        cache().clear()
+    }
 
     private fun saveSecret(name: String, value: String) {
         require(value.isNotBlank() && value.length <= 8192)
@@ -33,16 +43,18 @@ class SessionStore(context: Context) {
         val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
         val encoded = Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)
         check(prefs.edit().putString(name, encoded).commit()) { "Could not persist session" }
+        cache()[name] = value
     }
 
     private fun readSecret(name: String): String? {
+        cache()[name]?.let { return it }
         val value = prefs.getString(name, null) ?: return null
         return try {
             val bytes = Base64.decode(value, Base64.NO_WRAP)
             require(bytes.size > 12)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
-            String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
+            String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8).also { cache()[name] = it }
         } catch (_: Exception) { clear(); null }
     }
 
@@ -56,6 +68,10 @@ class SessionStore(context: Context) {
             .setRandomizedEncryptionRequired(true)
             .build())
         return generator.generateKey()
+    }
+
+    private companion object {
+        private val cachedSecrets: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
     }
 }
 
