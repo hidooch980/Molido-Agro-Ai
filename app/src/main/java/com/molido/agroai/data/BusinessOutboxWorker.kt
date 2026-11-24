@@ -35,7 +35,13 @@ class BusinessOutboxWorker(context: Context, params: WorkerParameters) : Corouti
         return try {
             val pending = dao.pending(accountId, 50)
             for (record in pending) {
-                val payload = JSONObject(SyncPayloadCipher.decrypt(record.encryptedPayload))
+                val payload = try {
+                    JSONObject(SyncPayloadCipher.decrypt(record.encryptedPayload))
+                } catch (e: Exception) {
+                    // One unreadable record must not block every other pending CRM/ERP row.
+                    dao.setState(record.id, "CONFLICT")
+                    continue
+                }
                 val operation = JSONObject()
                     .put("idempotencyKey", "business:" + record.entityType + ":" + record.entityId)
                     .put("entityType", record.entityType)
