@@ -10,6 +10,21 @@ capture_emulator_diagnostics() {
   adb devices -l > "$DIAG_DIR/molido-adb-devices.txt" 2>&1
   timeout 20s adb logcat -d -v threadtime > "$DIAG_DIR/molido-emulator-logcat.txt" 2>&1
   timeout 20s adb shell dumpsys activity processes > "$DIAG_DIR/molido-emulator-processes.txt" 2>&1
+  if [[ "$status" -ne 0 ]]; then
+    # Publish the failure reason as a workflow annotation: annotations stay readable
+    # without an authenticated artifact download, so a red run explains itself.
+    local log="$DIAG_DIR/molido-instrumentation-gradle.log"
+    local excerpt="exit=$status; no instrumentation log was written"
+    if [[ -s "$log" ]]; then
+      excerpt="$(grep -aE 'FAILED|AssertionError|Exception|Error:|failed|crash|No connected devices|INSTALL_FAILED' "$log" | tail -n 12)"
+      if [[ -z "$excerpt" ]]; then
+        excerpt="$(tail -n 12 "$log")"
+      fi
+      excerpt="exit=$status; ${excerpt}"
+    fi
+    excerpt="${excerpt//$'\n'/ | }"
+    echo "::error title=Android instrumentation failed::${excerpt:0:3000}"
+  fi
   return "$status"
 }
 trap capture_emulator_diagnostics EXIT

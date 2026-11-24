@@ -159,7 +159,7 @@ jobs:
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           emulator-boot-timeout: 1800
-          disable-animations: false
+          disable-animations: true
           script: bash .github/scripts/run-android-instrumentation.sh
 
       - name: Capture emulator diagnostics
