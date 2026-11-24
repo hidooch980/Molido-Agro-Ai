@@ -10,6 +10,8 @@ from decimal import Decimal, InvalidOperation
 from typing import Literal
 
 from fastapi import Header, HTTPException
+
+from authorization import require_approver
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -417,6 +419,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
+            require_approver(c, user)
             replay = replay_control_action(c,user,body.idempotencyKey,"RETURN_APPROVE",document_id)
             if replay is not None:
                 return replay
@@ -530,6 +533,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
+            require_approver(c, user)
             replay = replay_control_action(c,user,body.idempotencyKey,"SCRAP_APPROVE",document_id)
             if replay is not None:
                 return replay
@@ -619,6 +623,7 @@ def register_advanced_inventory_control_routes(app, db, current_user, decrypt_pa
         user=actor(authorization); now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
+            require_approver(c, user)
             replay = replay_control_action(c,user,body.idempotencyKey,"COUNT_APPROVE",document_id)
             if replay is not None:
                 return replay

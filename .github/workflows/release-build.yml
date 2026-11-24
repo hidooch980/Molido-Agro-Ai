@@ -66,6 +66,7 @@ jobs:
             sleep 2
           done
           test "$ready" = true
+          curl --fail --silent http://127.0.0.1:18080/metrics | grep -q '"service": "molido-agro-sync"'
           python - <<'PY'
           import json, urllib.request
           with urllib.request.urlopen("http://127.0.0.1:18080/openapi.json", timeout=5) as response:
@@ -360,7 +361,9 @@ jobs:
 
   publish-release:
     name: Publish signed release
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)
+    # GitHub Releases can only be created from a tag ref, so publishing always requires a v* tag.
+    # A manual dispatch on a tag still needs the explicit publish approval below.
+    if: startsWith(github.ref, 'refs/tags/v') && (github.event_name != 'workflow_dispatch' || inputs.publish_release == true)
     needs: [server-tests, android-instrumented-tests, assemble-release]
     runs-on: ubuntu-latest
     permissions:
@@ -403,6 +406,7 @@ jobs:
       - name: Publish signed GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           files: |
             dist/molido-agro-ai.apk
             dist/latest.json

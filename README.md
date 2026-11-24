@@ -46,6 +46,10 @@
 - [مدل داده](docs/DATA_MODEL.md)
 - [ایمنی توصیه‌های کشاورزی](docs/AGRICULTURAL_SAFETY.md)
 - [وضعیت پیاده‌سازی](docs/IMPLEMENTATION_STATUS.md)
+- [قرارداد API همگام‌سازی](docs/SYNC_API_CONTRACT.md)
+- [امنیت، همگام‌سازی و آمادگی انتشار](docs/SECURITY_SYNC_RELEASE_READINESS.md)
+- [استقرار LAN، TLS و بازیابی](docs/LAN_DEPLOYMENT_AND_RECOVERY.md)
+- [CRM و ERP](docs/CRM_ERP.md)
 
 ## مجوز
 
@@ -55,4 +59,4 @@
 ## CRM + ERP implementation status
 The CRM/ERP foundation is being delivered incrementally. Current backend work includes account-scoped customers, suppliers, products, CRM leads/activities/tickets, draft sales and purchase orders, inventory reservations and fulfilment, harvest-to-inventory posting, double-entry journals, human approval for manual ledger entries, and partial settlements. The Android Persian CRM/ERP tab currently provides encrypted local create-only forms and an HTTPS outbox for customers, suppliers, products, opportunities, tickets, draft orders and harvest records.
 
-This is not yet a complete production CRM/ERP: mobile update/delete and remote pull/conflict resolution, domain-table projection from the generic sync outbox, full mobile order/accounting workflows, Iranian statutory accounting/tax, multi-warehouse/lot/quality/costing, and physical-device acceptance tests remain outstanding. See [CRM_ERP.md](docs/CRM_ERP.md) for the detailed scope and limits.
+Customers, suppliers and products pushed from Android are now projected server-side into the CRM/ERP tables, so offline captures appear in the CRM/ERP APIs. This is still not a complete production CRM/ERP: mobile update/delete and remote pull/conflict resolution, full mobile order/accounting workflows, Iranian statutory accounting/tax, multi-warehouse/lot/quality/costing, and physical-device acceptance tests remain outstanding. See [CRM_ERP.md](docs/CRM_ERP.md) for the detailed scope and limits.

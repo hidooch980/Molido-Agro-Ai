@@ -24,6 +24,13 @@ agro.home.arpa {
 
 گواهی ریشه CA مربوط به Caddy باید از مسیر امن به دستگاه‌های Android مورد اعتماد نصب شود. فایل CA خصوصی را هرگز در APK، GitHub یا پیام‌رسان قرار ندهید. در محیط تولید سازمانی بهتر است از CA داخلی مدیریت‌شده استفاده شود. از HTTP cleartext یا غیرفعال کردن اعتبارسنجی TLS در اپ استفاده نکنید.
 
+نکته مهم Android 7+: اپ تنها CAهای مخزن سیستم را باور می‌کند؛ نصب CA به‌عنوان «CA کاربر» برای نسخه release کافی نیست. پیکربندی `app/src/main/res/xml/network_security_config.xml` چنین است:
+
+- نسخه release فقط `system` را باور می‌کند و cleartext را ممنوع می‌کند.
+- نسخه debug با `debug-overrides` علاوه بر `system`، `user` را هم می‌پذیرد؛ پس آزمون LAN با CA خصوصی Caddy فقط با build نوع debug ممکن است.
+
+برای نسخه release یکی از دو مسیر لازم است: گواهی معتبر عمومی (مثلاً Let's Encrypt با چالش DNS روی دامنه واقعی) یا نصب CA داخلی در مخزن سیستم دستگاه‌ها با MDM/root. قرار دادن CA خصوصی داخل APK یا غیرفعال کردن اعتبارسنجی TLS مجاز نیست.
+
 ## متغیرهای محرمانه
 
 مقادیر زیر فقط در فایل محیطی خارج از مخزن یا secret manager سرور قرار گیرند؛ فایل حاوی اسرار را commit نکنید:
@@ -34,6 +41,7 @@ agro.home.arpa {
 - `CHIRPSTACK_MQTT_USERNAME` و `CHIRPSTACK_MQTT_PASSWORD`: حساب اختصاصی با دسترسی فقط subscribe به topicهای لازم.
 - `CHIRPSTACK_MQTT_CA_CERT`: مسیر CA صادرکننده گواهی broker.
 - `MOLIDO_API_CA_CERT`: در صورت نیاز مسیر CA صادرکننده گواهی HTTPS API.
+- `MOLIDO_TRUST_PROXY_HEADERS`: فقط وقتی Caddy تنها مسیر دسترسی به API است روی `1` تنظیم شود تا محدودیت نرخ از `X-Forwarded-For` استفاده کند؛ در غیر این صورت مقدار `0` بماند.
 
 برای Android، مقدار `SYNC_BASE_URL` در build باید URL نهایی HTTPS LAN باشد. چون hostname و CA محیط نصب هنوز تعیین نشده‌اند، نباید URL فرضی را در نسخه انتشار قرار داد.
 

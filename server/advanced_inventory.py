@@ -10,6 +10,8 @@ from decimal import Decimal, InvalidOperation
 from typing import Literal
 
 from fastapi import Header, HTTPException
+
+from authorization import require_approver
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -351,6 +353,7 @@ def register_advanced_inventory_routes(app, db, current_user) -> None:
             expected=os.environ.get("MOLIDO_INVENTORY_APPROVAL_TOKEN","")
             if len(expected)<32 or not x_approval_token or not hmac.compare_digest(expected,x_approval_token):
                 raise HTTPException(403,"Quality approval is not configured or token is invalid")
+            require_approver(c, user)
             c.execute("UPDATE adv_lots SET quality_state=? WHERE user_id=? AND lot_id=?",(body.state,user,lot_id))
             c.execute("INSERT INTO adv_quality_events VALUES(?,?,?,?,?,?,?,?,?)",
               (uuid.uuid4().hex,user,lot_id,old,body.state,body.reason,body.evidenceRef,user,now))

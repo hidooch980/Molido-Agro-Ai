@@ -24,6 +24,12 @@ interface BusinessRecordDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(item: BusinessRecordEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: BusinessRecordEntity)
+
+    @Query("DELETE FROM business_records WHERE id = :id")
+    suspend fun deleteById(id: String)
+
     @Query("SELECT * FROM business_records ORDER BY createdAtEpochMillis DESC LIMIT 500")
     fun observeAll(): Flow<List<BusinessRecordEntity>>
 

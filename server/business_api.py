@@ -59,56 +59,64 @@ class FinanceEntryInput(BaseModel):
     reference: str | None = Field(default=None, max_length=200)
 
 
+BUSINESS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS business_parties (
+    user_id TEXT NOT NULL, party_type TEXT NOT NULL, party_id TEXT NOT NULL,
+    payload TEXT NOT NULL, created_at INTEGER NOT NULL,
+    PRIMARY KEY(user_id, party_type, party_id)
+);
+CREATE TABLE IF NOT EXISTS business_products (
+    user_id TEXT NOT NULL, product_id TEXT NOT NULL, sku TEXT NOT NULL,
+    payload TEXT NOT NULL, created_at INTEGER NOT NULL,
+    PRIMARY KEY(user_id, product_id), UNIQUE(user_id, sku)
+);
+CREATE TABLE IF NOT EXISTS inventory_balances (
+    user_id TEXT NOT NULL, warehouse_id TEXT NOT NULL, product_id TEXT NOT NULL,
+    quantity REAL NOT NULL CHECK(quantity >= 0), updated_at INTEGER NOT NULL,
+    PRIMARY KEY(user_id, warehouse_id, product_id)
+);
+CREATE TABLE IF NOT EXISTS inventory_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL, warehouse_id TEXT NOT NULL, product_id TEXT NOT NULL,
+    movement_type TEXT NOT NULL, quantity REAL NOT NULL, payload TEXT NOT NULL,
+    created_at INTEGER NOT NULL, UNIQUE(user_id, idempotency_key)
+);
+CREATE TABLE IF NOT EXISTS business_orders (
+    user_id TEXT NOT NULL, order_id TEXT NOT NULL, order_type TEXT NOT NULL,
+    party_id TEXT NOT NULL, status TEXT NOT NULL, total REAL NOT NULL,
+    payload TEXT NOT NULL, created_at INTEGER NOT NULL,
+    PRIMARY KEY(user_id, order_id)
+);
+CREATE TABLE IF NOT EXISTS finance_entries (
+    user_id TEXT NOT NULL, entry_id TEXT NOT NULL, direction TEXT NOT NULL,
+    amount REAL NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL,
+    payload TEXT NOT NULL, created_at INTEGER NOT NULL,
+    PRIMARY KEY(user_id, entry_id)
+);
+CREATE TABLE IF NOT EXISTS business_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
+    action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_business_parties_lookup
+    ON business_parties(user_id, party_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_business_orders_lookup
+    ON business_orders(user_id, order_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_inventory_movements_lookup
+    ON inventory_movements(user_id, warehouse_id, created_at DESC);
+"""
+
+
+def ensure_business_tables(connection) -> None:
+    """Create the CRM/ERP tables. Shared with the offline-sync bridge."""
+    connection.executescript(BUSINESS_SCHEMA)
+
+
 def register_business_routes(app, db, current_user, encrypt_payload, decrypt_payload) -> None:
     """Account-isolated first CRM/ERP transaction APIs. Finance remains unposted pending approval."""
 
     def ensure_tables(connection) -> None:
-        connection.executescript("""
-        CREATE TABLE IF NOT EXISTS business_parties (
-            user_id TEXT NOT NULL, party_type TEXT NOT NULL, party_id TEXT NOT NULL,
-            payload TEXT NOT NULL, created_at INTEGER NOT NULL,
-            PRIMARY KEY(user_id, party_type, party_id)
-        );
-        CREATE TABLE IF NOT EXISTS business_products (
-            user_id TEXT NOT NULL, product_id TEXT NOT NULL, sku TEXT NOT NULL,
-            payload TEXT NOT NULL, created_at INTEGER NOT NULL,
-            PRIMARY KEY(user_id, product_id), UNIQUE(user_id, sku)
-        );
-        CREATE TABLE IF NOT EXISTS inventory_balances (
-            user_id TEXT NOT NULL, warehouse_id TEXT NOT NULL, product_id TEXT NOT NULL,
-            quantity REAL NOT NULL CHECK(quantity >= 0), updated_at INTEGER NOT NULL,
-            PRIMARY KEY(user_id, warehouse_id, product_id)
-        );
-        CREATE TABLE IF NOT EXISTS inventory_movements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
-            idempotency_key TEXT NOT NULL, warehouse_id TEXT NOT NULL, product_id TEXT NOT NULL,
-            movement_type TEXT NOT NULL, quantity REAL NOT NULL, payload TEXT NOT NULL,
-            created_at INTEGER NOT NULL, UNIQUE(user_id, idempotency_key)
-        );
-        CREATE TABLE IF NOT EXISTS business_orders (
-            user_id TEXT NOT NULL, order_id TEXT NOT NULL, order_type TEXT NOT NULL,
-            party_id TEXT NOT NULL, status TEXT NOT NULL, total REAL NOT NULL,
-            payload TEXT NOT NULL, created_at INTEGER NOT NULL,
-            PRIMARY KEY(user_id, order_id)
-        );
-        CREATE TABLE IF NOT EXISTS finance_entries (
-            user_id TEXT NOT NULL, entry_id TEXT NOT NULL, direction TEXT NOT NULL,
-            amount REAL NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL,
-            payload TEXT NOT NULL, created_at INTEGER NOT NULL,
-            PRIMARY KEY(user_id, entry_id)
-        );
-        CREATE TABLE IF NOT EXISTS business_audit_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
-            action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
-            created_at INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_business_parties_lookup
-            ON business_parties(user_id, party_type, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_business_orders_lookup
-            ON business_orders(user_id, order_type, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_inventory_movements_lookup
-            ON inventory_movements(user_id, warehouse_id, created_at DESC);
-        """)
+        ensure_business_tables(connection)
 
     def actor(authorization: str | None) -> str:
         return current_user(authorization)

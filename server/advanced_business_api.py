@@ -8,6 +8,8 @@ import uuid
 from typing import Literal
 
 from fastapi import Header, HTTPException
+
+from authorization import require_approver
 from pydantic import BaseModel, Field
 
 
@@ -365,6 +367,7 @@ def register_advanced_business_routes(app, db, current_user, encrypt_payload, de
             raise HTTPException(403,"Ledger approval authorization failed")
         with db() as c:
             setup(c,uid)
+            require_approver(c,uid)
             changed=c.execute("UPDATE journal_entries SET status='POSTED' WHERE user_id=? AND journal_id=? AND status='PENDING_APPROVAL'",
                               (uid,journal_id)).rowcount
             if not changed: raise HTTPException(404,"Pending journal not found")

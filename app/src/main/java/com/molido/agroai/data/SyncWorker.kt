@@ -3,6 +3,7 @@ package com.molido.agroai.data
 import com.molido.agroai.BuildConfig
 
 import android.content.Context
+import androidx.room.withTransaction
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -42,37 +43,12 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val db = AgroDatabaseProvider.get(applicationContext)
         val dao = db.syncOperationDao()
         return try {
-            val due = dao.due(limit = 50)
-            for (operation in due) {
-                val payload = JSONObject(SyncPayloadCipher.decrypt(operation.payloadJson))
-                val body = JSONObject()
-                    .put("operations", JSONArray().put(JSONObject()
-                        .put("idempotencyKey", operation.idempotencyKey)
-                        .put("entityType", operation.entityType)
-                        .put("entityId", operation.entityId)
-                        .put("operation", operation.operation)
-                        .put("payload", payload)
-                        .put("baseVersion", operation.baseVersion)))
-                val response = request("$base/v1/sync/push", token, body.toString())
-                val result = JSONObject(response).getJSONArray("results").getJSONObject(0)
-                when (result.optString("status")) {
-                    "applied" -> {
-                        dao.markSynced(operation.id)
-                        val version = result.optInt("serverVersion", 0)
-                        if (version > 0) db.syncInboxDao().receive(SyncInboxEntity(
-                            id = "${operation.entityType}:${operation.entityId}:$version",
-                            entityType = operation.entityType,
-                            entityId = operation.entityId,
-                            encryptedPayload = operation.payloadJson,
-                            serverVersion = version,
-                            updatedAtEpochMillis = System.currentTimeMillis(),
-                            deleted = operation.operation == "DELETE",
-                            state = "SYNCED"
-                        ))
-                    }
-                    "conflict" -> dao.markConflict(operation.id, "Server version conflict: ${result.optLong("serverVersion")}")
-                    else -> dao.scheduleRetry(operation.id, "Unrecognized server response", SyncRetryPolicy.nextAttemptAt(System.currentTimeMillis(), operation.attemptCount))
-                }
+            var rounds = 0
+            while (rounds < MAX_PUSH_ROUNDS) {
+                val batch = buildBatch(dao)
+                if (batch.isEmpty()) break
+                pushBatch(base, token, db, dao, batch)
+                rounds += 1
             }
             pullRemoteChanges(base, token, db)
             Result.success()
@@ -87,39 +63,149 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
         }
     }
 
+    /**
+     * Collects pending operations into one push request. The server rejects bodies above
+     * 1 MiB, so the batch stops before crossing the local byte budget instead of failing
+     * the whole round.
+     */
+    private suspend fun buildBatch(dao: SyncOperationDao): List<Pair<SyncOperationEntity, JSONObject>> {
+        val due = dao.due(limit = MAX_BATCH_OPERATIONS)
+        val batch = ArrayList<Pair<SyncOperationEntity, JSONObject>>(due.size)
+        var approxBytes = 0
+        for (operation in due) {
+            val payload = JSONObject(SyncPayloadCipher.decrypt(operation.payloadJson))
+            val entry = JSONObject()
+                .put("idempotencyKey", operation.idempotencyKey)
+                .put("entityType", operation.entityType)
+                .put("entityId", operation.entityId)
+                .put("operation", operation.operation)
+                .put("payload", payload)
+                .put("baseVersion", operation.baseVersion)
+            val size = entry.toString().toByteArray(Charsets.UTF_8).size
+            if (batch.isNotEmpty() && approxBytes + size > MAX_BATCH_BYTES) break
+            batch.add(operation to entry)
+            approxBytes += size
+        }
+        return batch
+    }
+
+    private suspend fun pushBatch(
+        base: String,
+        token: String,
+        db: AgroDatabase,
+        dao: SyncOperationDao,
+        batch: List<Pair<SyncOperationEntity, JSONObject>>
+    ) {
+        val operations = JSONArray()
+        for ((_, entry) in batch) operations.put(entry)
+        val body = JSONObject().put("operations", operations).toString()
+        val response = JSONObject(request("$base/v1/sync/push", token, body))
+        val results = response.optJSONArray("results") ?: JSONArray()
+        val byKey = HashMap<String, JSONObject>(results.length())
+        for (index in 0 until results.length()) {
+            val result = results.optJSONObject(index) ?: continue
+            val key = result.optString("idempotencyKey")
+            if (key.isNotEmpty()) byKey[key] = result
+        }
+        val now = System.currentTimeMillis()
+        for ((operation, _) in batch) {
+            val result = byKey[operation.idempotencyKey]
+            if (result == null) {
+                dao.scheduleRetry(operation.id, "Server did not report a result for this operation",
+                    SyncRetryPolicy.nextAttemptAt(now, operation.attemptCount))
+                continue
+            }
+            when (result.optString("status")) {
+                "applied" -> {
+                    dao.markSynced(operation.id)
+                    val version = result.optInt("serverVersion", 0)
+                    if (version > 0) db.syncInboxDao().receive(SyncInboxEntity(
+                        id = "${operation.entityType}:${operation.entityId}:$version",
+                        entityType = operation.entityType,
+                        entityId = operation.entityId,
+                        encryptedPayload = operation.payloadJson,
+                        serverVersion = version,
+                        updatedAtEpochMillis = now,
+                        deleted = operation.operation == "DELETE",
+                        state = "SYNCED"
+                    ))
+                }
+                "conflict" -> dao.markConflict(operation.id, "Server version conflict: ${result.optLong("serverVersion")}")
+                else -> dao.scheduleRetry(operation.id, "Unrecognized server response",
+                    SyncRetryPolicy.nextAttemptAt(now, operation.attemptCount))
+            }
+        }
+    }
+
     private suspend fun pullRemoteChanges(base: String, token: String, db: AgroDatabase) {
         val prefs = applicationContext.getSharedPreferences("molido_sync_state", Context.MODE_PRIVATE)
-        val cursor = prefs.getLong("remote_cursor", 0L)
-        val body = JSONObject().put("cursor", cursor).put("limit", 100).toString()
-        val response = JSONObject(request("$base/v1/sync/pull", token, body))
-        val changes = response.optJSONArray("changes") ?: JSONArray()
+        val startCursor = prefs.getLong("remote_cursor", 0L)
+        var newestCursor = startCursor
         val inbox = db.syncInboxDao()
         val outbox = db.syncOperationDao()
-        var newestCursor = cursor
-        for (index in 0 until changes.length()) {
-            val change = changes.getJSONObject(index)
-            val type = change.getString("entityType")
-            val entityId = change.getString("entityId")
-            val version = change.getInt("version")
-            val payload = change.optJSONObject("payload") ?: JSONObject()
-            val localPending = outbox.pendingForEntity(type, entityId) ?: outbox.conflictedForEntity(type, entityId)
-            val state = if (localPending != null) "CONFLICT" else "PENDING_REVIEW"
-            if (localPending != null) outbox.markConflict(localPending.id, "Remote update arrived while local changes were pending")
-            inbox.receive(SyncInboxEntity(
-                id = "$type:$entityId:$version", entityType = type, entityId = entityId,
-                encryptedPayload = SyncPayloadCipher.encrypt(applicationContext, payload.toString()),
-                serverVersion = version, updatedAtEpochMillis = change.optLong("updatedAt"),
-                deleted = change.optBoolean("deleted"), state = state
-            ))
-            newestCursor = maxOf(newestCursor, change.optLong("cursorId"))
+        val projector = SyncProjector(db)
+        var rounds = 0
+        while (rounds < MAX_PULL_ROUNDS) {
+            val body = JSONObject().put("cursor", newestCursor).put("limit", PULL_PAGE_SIZE).toString()
+            val response = JSONObject(request("$base/v1/sync/pull", token, body))
+            val changes = response.optJSONArray("changes") ?: JSONArray()
+            for (index in 0 until changes.length()) {
+                val change = changes.optJSONObject(index) ?: continue
+                val type = change.getString("entityType")
+                val entityId = change.getString("entityId")
+                val version = change.getInt("version")
+                val payload = change.optJSONObject("payload") ?: JSONObject()
+                val deleted = change.optBoolean("deleted")
+                val inboxEntity = SyncInboxEntity(
+                    id = "$type:$entityId:$version",
+                    entityType = type,
+                    entityId = entityId,
+                    encryptedPayload = SyncPayloadCipher.encrypt(applicationContext, payload.toString()),
+                    serverVersion = version,
+                    updatedAtEpochMillis = change.optLong("updatedAt"),
+                    deleted = deleted,
+                    state = "APPLIED"
+                )
+                val pending = outbox.pendingForEntity(type, entityId) ?: outbox.conflictedForEntity(type, entityId)
+                if (pending != null) {
+                    outbox.markConflict(pending.id, "Remote update arrived while local changes were pending")
+                    inbox.receive(inboxEntity.copy(state = "CONFLICT"))
+                } else if (projector.supports(type)) {
+                    try {
+                        db.withTransaction {
+                            val recheck = outbox.pendingForEntity(type, entityId) ?: outbox.conflictedForEntity(type, entityId)
+                            if (recheck != null) {
+                                outbox.markConflict(recheck.id, "Remote update arrived while local changes were pending")
+                                inbox.receive(inboxEntity.copy(state = "CONFLICT"))
+                            } else {
+                                projector.applyChange(inboxEntity)
+                                inbox.receive(inboxEntity)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // Keep the change for manual review instead of dropping it silently.
+                        inbox.receive(inboxEntity.copy(state = "PENDING_REVIEW"))
+                    }
+                } else {
+                    inbox.receive(inboxEntity.copy(state = "PENDING_REVIEW"))
+                }
+                newestCursor = maxOf(newestCursor, change.optLong("cursorId"))
+            }
+            rounds += 1
+            val serverCursor = response.optLong("cursor", newestCursor)
+            newestCursor = maxOf(newestCursor, serverCursor)
+            if (changes.length() < PULL_PAGE_SIZE) break
         }
-        val serverCursor = response.optLong("cursor", newestCursor)
-        check(prefs.edit().putLong("remote_cursor", maxOf(newestCursor, serverCursor)).commit())
+        if (newestCursor != startCursor) {
+            check(prefs.edit().putLong("remote_cursor", newestCursor).commit())
+        }
     }
+
     private suspend fun dueRetry(dao: SyncOperationDao, error: Exception) {
-        dao.due(limit = 50).forEach { op ->
+        val now = System.currentTimeMillis()
+        dao.due(limit = MAX_BATCH_OPERATIONS).forEach { op ->
             dao.scheduleRetry(op.id, (error.message ?: "Sync error").take(500),
-                SyncRetryPolicy.nextAttemptAt(System.currentTimeMillis(), op.attemptCount))
+                SyncRetryPolicy.nextAttemptAt(now, op.attemptCount))
         }
     }
 
@@ -143,5 +229,13 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
             if (code !in 200..299) throw java.io.IOException("Sync API returned HTTP $code")
             return text
         } finally { connection.disconnect() }
+    }
+
+    private companion object {
+        const val MAX_BATCH_OPERATIONS = 50
+        const val MAX_BATCH_BYTES = 500_000
+        const val MAX_PUSH_ROUNDS = 5
+        const val MAX_PULL_ROUNDS = 5
+        const val PULL_PAGE_SIZE = 100
     }
 }

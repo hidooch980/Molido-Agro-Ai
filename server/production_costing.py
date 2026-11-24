@@ -7,6 +7,8 @@ import time
 import uuid
 from decimal import Decimal, InvalidOperation
 from fastapi import Header, HTTPException
+
+from authorization import require_approver
 from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 
@@ -141,6 +143,7 @@ def register_production_costing_routes(app, db, current_user, decrypt_payload) -
         now=int(time.time()*1000)
         with db() as c:
             schema(c); c.execute("BEGIN IMMEDIATE")
+            require_approver(c, user)
             row=c.execute("SELECT approval_status FROM crop_cost_entries WHERE user_id=? AND entry_id=?",(user,entry_id)).fetchone()
             if not row: raise HTTPException(404,"Cost entry not found in this account")
             if row["approval_status"]=="APPROVED": return {"status":"already_approved","entryId":entry_id}
