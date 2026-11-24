@@ -408,6 +408,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
+          # The stable 1.0.0 gate is not met yet, so 0.x releases stay marked as pre-releases.
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
           files: |
             dist/molido-agro-ai.apk
             dist/latest.json
