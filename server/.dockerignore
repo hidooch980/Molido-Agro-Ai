@@ -1,0 +1,10 @@
+# Tests and local tooling are not part of the runtime image.
+test_*.py
+conftest.py
+__pycache__
+.pytest_cache
+*.pyc
+*.sqlite3
+.venv
+compose.yaml
+README.md
