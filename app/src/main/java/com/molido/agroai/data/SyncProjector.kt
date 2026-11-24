@@ -11,8 +11,6 @@ import org.json.JSONObject
  */
 class SyncProjector(private val database: AgroDatabase) {
     /** Farm records map onto their own tables; every other type is a generic business record. */
-    fun supports(entityType: String): Boolean = entityType.isNotBlank()
-
     suspend fun applyChange(change: SyncInboxEntity) {
         val payload = JSONObject(SyncPayloadCipher.decrypt(change.encryptedPayload))
         if (change.deleted) delete(change.entityType, change.entityId)
@@ -31,7 +29,13 @@ class SyncProjector(private val database: AgroDatabase) {
     }
 
     suspend fun applyPayload(entityType: String, entityId: String, payload: JSONObject) {
-        fun nullableDouble(key: String): Double? = if (payload.isNull(key) || !payload.has(key)) null else payload.getDouble(key)
+        // org.json reports an absent key as "not null", so presence must be checked first:
+        // otherwise an omitted optional field becomes "" or 0 instead of staying null.
+        fun present(key: String): Boolean = payload.has(key) && !payload.isNull(key)
+        fun optionalString(key: String): String? = if (present(key)) payload.optString(key) else null
+        fun optionalInt(key: String): Int? = if (present(key)) payload.optInt(key) else null
+        fun optionalLong(key: String): Long? = if (present(key)) payload.optLong(key) else null
+        fun nullableDouble(key: String): Double? = if (present(key)) payload.getDouble(key) else null
         when (entityType) {
             "greenhouse" -> database.greenhouseDao().upsert(GreenhouseEntity(
                 entityId, payload.getString("name"), payload.getDouble("areaSquareMeters"),
@@ -42,18 +46,18 @@ class SyncProjector(private val database: AgroDatabase) {
             "crop_cycle" -> database.cropCycleDao().upsert(CropCycleEntity(
                 entityId, payload.getString("greenhouseId"), payload.getString("cropCode"),
                 payload.optLong("startDateEpochMillis"),
-                if (payload.isNull("expectedHarvestDateEpochMillis")) null else payload.optLong("expectedHarvestDateEpochMillis"),
+                optionalLong("expectedHarvestDateEpochMillis"),
                 payload.getDouble("plantedAreaSquareMeters"),
-                if (payload.isNull("plantCount")) null else payload.optInt("plantCount"),
+                optionalInt("plantCount"),
                 payload.optString("status", "ACTIVE"), payload.optString("notes")
             ))
             "farm_activity" -> database.farmActivityDao().upsert(FarmActivityEntity(
                 entityId,
-                if (payload.isNull("greenhouseId")) null else payload.optString("greenhouseId"),
-                if (payload.isNull("cropCycleId")) null else payload.optString("cropCycleId"),
-                if (payload.isNull("cropCode")) null else payload.optString("cropCode"),
+                optionalString("greenhouseId"),
+                optionalString("cropCycleId"),
+                optionalString("cropCode"),
                 payload.getString("type"), payload.getString("title"), nullableDouble("quantity"),
-                if (payload.isNull("unit")) null else payload.optString("unit"), nullableDouble("cost"),
+                optionalString("unit"), nullableDouble("cost"),
                 payload.optLong("occurredAtEpochMillis", System.currentTimeMillis()), payload.optString("notes")
             ))
             "inventory_item" -> database.inventoryDao().upsert(InventoryItemEntity(
@@ -63,7 +67,7 @@ class SyncProjector(private val database: AgroDatabase) {
             ))
             "financial_entry" -> database.financeDao().upsert(FinancialEntryEntity(
                 entityId,
-                if (payload.isNull("greenhouseId")) null else payload.optString("greenhouseId"),
+                optionalString("greenhouseId"),
                 payload.getString("type"), payload.optString("category"), payload.getDouble("amount"),
                 payload.optString("currency", "IRR"),
                 payload.optLong("occurredAtEpochMillis", System.currentTimeMillis()),

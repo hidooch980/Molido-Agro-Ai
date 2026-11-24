@@ -73,7 +73,13 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val batch = ArrayList<Pair<SyncOperationEntity, JSONObject>>(due.size)
         var approxBytes = 0
         for (operation in due) {
-            val payload = JSONObject(SyncPayloadCipher.decrypt(operation.payloadJson))
+            val payload = try {
+                JSONObject(SyncPayloadCipher.decrypt(operation.payloadJson))
+            } catch (e: Exception) {
+                // A single unreadable payload must not fail every round and stall the queue.
+                dao.markConflict(operation.id, "Stored payload could not be decrypted; re-enter this record")
+                continue
+            }
             val entry = JSONObject()
                 .put("idempotencyKey", operation.idempotencyKey)
                 .put("entityType", operation.entityType)
@@ -170,7 +176,7 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
                 if (pending != null) {
                     outbox.markConflict(pending.id, "Remote update arrived while local changes were pending")
                     inbox.receive(inboxEntity.copy(state = "CONFLICT"))
-                } else if (projector.supports(type)) {
+                } else {
                     try {
                         db.withTransaction {
                             val recheck = outbox.pendingForEntity(type, entityId) ?: outbox.conflictedForEntity(type, entityId)
@@ -186,8 +192,6 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
                         // Keep the change for manual review instead of dropping it silently.
                         inbox.receive(inboxEntity.copy(state = "PENDING_REVIEW"))
                     }
-                } else {
-                    inbox.receive(inboxEntity.copy(state = "PENDING_REVIEW"))
                 }
                 newestCursor = maxOf(newestCursor, change.optLong("cursorId"))
             }
