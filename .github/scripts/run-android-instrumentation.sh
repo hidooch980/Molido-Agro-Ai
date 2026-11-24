@@ -76,19 +76,22 @@ if [[ "$services_ready" != "true" ]]; then
 fi
 
 echo "Core Android services are ready; disabling animations."
+# The runner already disables animations before this script starts. Writing the
+# settings again is a best-effort guard: on a slow software-emulated device the
+# settings provider can briefly refuse writes, and that must not abort the run
+# before a single test executes.
 for setting in window_animation_scale transition_animation_scale animator_duration_scale; do
   success=false
-  for attempt in $(seq 1 5); do
+  for attempt in $(seq 1 20); do
     if adb shell settings put global "$setting" 0 >/dev/null 2>&1; then
       success=true
       break
     fi
     adb reconnect offline >/dev/null 2>&1 || true
-    sleep 2
+    sleep 3
   done
   if [[ "$success" != "true" ]]; then
-    echo "::error::Could not update Android setting $setting after retries."
-    exit 1
+    echo "::warning::Could not set $setting to 0; continuing because these tests do not depend on animations."
   fi
 done
 
