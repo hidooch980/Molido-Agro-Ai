@@ -154,8 +154,11 @@ jobs:
       - name: Run Android instrumentation tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
-          target: google_apis
+          # AOSP image without Google Play services: the app needs no Google APIs, and the
+          # GMS background churn was keeping the software-emulated device too busy to launch
+          # the Compose test activity (three consecutive "Process crashed" runs).
+          api-level: 30
+          target: default
           arch: x86_64
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -memory 3072
@@ -182,6 +185,7 @@ jobs:
             ${{ runner.temp }}/molido-emulator-processes.txt
             ${{ runner.temp }}/molido-adb-devices.txt
             ${{ runner.temp }}/molido-instrumentation-gradle.log
+            ${{ runner.temp }}/molido-instrumentation-gradle.attempt1.log
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/
           if-no-files-found: ignore
