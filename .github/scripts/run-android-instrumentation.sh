@@ -95,6 +95,35 @@ for setting in window_animation_scale transition_animation_scale animator_durati
   fi
 done
 
+echo "Emulator services are ready; verifying that adb shell answers within five seconds."
+# ddmlib reads ro.build.version.sdk with a five second budget. When the freshly booted
+# software-emulated device is still busy, that read times out, AGP treats the API level as 0
+# and the install fails with "Cannot install split APKs with API level < 21", so gate on
+# several consecutive fast answers instead of starting Gradle on a device that still stalls.
+responsive=false
+fast_reads=0
+for attempt in $(seq 1 90); do
+  sdk="$(timeout --signal=TERM --kill-after=5s 5s adb shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r' || true)"
+  if [[ "$sdk" =~ ^[0-9]+$ ]]; then
+    fast_reads=$((fast_reads + 1))
+    if [[ "$fast_reads" -ge 5 ]]; then
+      responsive=true
+      break
+    fi
+  else
+    fast_reads=0
+    adb reconnect offline >/dev/null 2>&1 || true
+  fi
+  sleep 2
+done
+
+if [[ "$responsive" != "true" ]]; then
+  echo "::error::Emulator did not answer 'adb shell getprop' within five seconds; installing the test APK would misread the API level."
+  adb devices -l || true
+  exit 1
+fi
+echo "Device answered five consecutive property reads within five seconds (API $sdk)."
+
 echo "Emulator services are ready; starting instrumentation tests."
 LOG="$DIAG_DIR/molido-instrumentation-gradle.log"
 # A software-emulated (TCG) device occasionally kills the instrumentation process itself.
