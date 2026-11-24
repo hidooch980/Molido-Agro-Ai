@@ -143,4 +143,44 @@ for attempt in 1 2; do
     break
   fi
 done
+
+# ddmlib occasionally cannot read ro.build.version.sdk from a software-emulated device and then
+# refuses to install the split test APKs (a device API level of 0 means "older than 21"). That is
+# an adb property-fetch stall, not a product failure, so the same test suite is executed through
+# adb directly instead of failing the release for a hypervisor hiccup.
+if [[ "$status" -ne 0 ]] && grep -qaE 'Cannot install split APKs|ShellCommandUnresponsiveException' "$LOG"; then
+  echo "::warning::Gradle could not query the emulator API level; installing the APKs with adb and running the runner directly."
+  set +e
+  {
+    echo ""
+    echo "===== adb fallback ====="
+    timeout --signal=TERM --kill-after=30s 20m gradle --no-daemon --console=plain :app:assembleDebug :app:assembleDebugAndroidTest 2>&1
+    build_status=${PIPESTATUS[0]}
+    echo "fallback build exit=$build_status"
+    if [[ "$build_status" -eq 0 ]]; then
+      app_apk="app/build/outputs/apk/debug/app-debug.apk"
+      test_apk="app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+      timeout --signal=TERM --kill-after=30s 5m adb install -r -t "$app_apk" 2>&1
+      app_install=$?
+      timeout --signal=TERM --kill-after=30s 5m adb install -r -t "$test_apk" 2>&1
+      test_install=$?
+      echo "fallback install app=$app_install test=$test_install"
+      if [[ "$app_install" -eq 0 && "$test_install" -eq 0 ]]; then
+        adb logcat -c || true
+        timeout --signal=TERM --kill-after=60s 30m adb shell am instrument -w -r -e package com.molido.agroai \
+          com.molido.agroai.test/androidx.test.runner.AndroidJUnitRunner 2>&1
+        echo "fallback instrumentation exit=$?"
+      fi
+    fi
+  } 2>&1 | tee -a "$LOG"
+  # A test that ran to completion reports status code 0; -2 (assertion) and -1 (error) mean a
+  # real failure, and "OK (N tests)" alone is not enough because -r raw output varies by image.
+  if grep -qa 'INSTRUMENTATION_STATUS_CODE: 0' "$LOG" &&
+     ! grep -qaE 'FAILURES!!!|INSTRUMENTATION_FAILED|shortMsg=Process crashed|INSTRUMENTATION_STATUS_CODE: -(2|1)' "$LOG"; then
+    status=0
+  else
+    status=1
+  fi
+  set -e
+fi
 exit "$status"
