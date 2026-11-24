@@ -65,7 +65,7 @@
 | Finance | Chart-of-accounts seed, balanced double-entry journal validation, pending approval, server-side approval token, posted-only report | RBAC/two-person approval, decimal-safe accounting, Iran statutory rules, tax, bank reconciliation |
 | Harvest | API records harvest batches linked to synchronized greenhouse/crop-cycle records and increases stock | Android harvest form/API integration, batch/lot traceability and cost-of-production |
 | Settlement | Records partial settlements and prevents amount above order total | Reconciliation, automatic ledger posting, refunds and idempotency |
-| Sync | Generic entity types added to authenticated encrypted sync record store; Android local records enqueue encrypted outbox operations | Domain materialization adapters, remote-to-Room application for every new entity, conflict and replay stress tests |
+| Sync | Authenticated encrypted batch push (≤50 ops / 500 KB per request) and cursor pull; every entity type is projected into Room (farm tables or `business_records`); conflicts are parked as `CONFLICT`/`PENDING_REVIEW` instead of being dropped | Conflict review UI, replay/clock-skew stress tests, multi-device acceptance |
 | Security/concurrency/recovery | Account scoping and write locks added to key inventory/order/ledger paths; tests added for account isolation, approval gate and concurrent sales reservation oversell prevention | Full penetration/security review, parallel load test, backup/restore with expanded schema, real LAN and phone acceptance |
 
 This expansion is source-code work under review. It is not a deployed or production-ready CRM/ERP release.
