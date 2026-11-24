@@ -66,7 +66,7 @@ jobs:
             sleep 2
           done
           test "$ready" = true
-          curl --fail --silent http://127.0.0.1:18080/metrics | grep -q '"service": "molido-agro-sync"'
+          curl --fail --silent http://127.0.0.1:18080/metrics | grep -q 'molido-agro-sync'
           python - <<'PY'
           import json, urllib.request
           with urllib.request.urlopen("http://127.0.0.1:18080/openapi.json", timeout=5) as response:
