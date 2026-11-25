@@ -355,6 +355,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Upload exported Room schemas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: room-schemas-${{ github.run_number }}
+          path: app/schemas/
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Upload Android test reports
         if: always()
         uses: actions/upload-artifact@v4

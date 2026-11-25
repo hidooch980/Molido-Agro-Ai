@@ -155,17 +155,42 @@ private fun AgroApp() {
     }
 }
 
+private fun entityTypeLabel(type: String): String = when (type) {
+    "greenhouse" -> "گلخانه"
+    "crop_cycle" -> "دوره کشت"
+    "farm_activity" -> "عملیات زراعی"
+    "inventory_item" -> "کالای انبار"
+    "financial_entry" -> "تراکنش مالی"
+    else -> "رکورد کسب‌وکار"
+}
+
+/** One readable line for a queued change, so the user does not have to read a raw entity id. */
+private fun conflictLabel(change: SyncInboxEntity): String {
+    val payload = JSONObject(SyncPayloadCipher.decrypt(change.encryptedPayload))
+    val title = listOf("name", "title", "subject", "cropCode")
+        .firstNotNullOfOrNull { key -> payload.optString(key).takeIf { it.isNotBlank() } }
+    return entityTypeLabel(change.entityType) + " • " + (title ?: change.entityId.take(8))
+}
+
 @Composable
 private fun SyncInboxPanel(context: android.content.Context, db: AgroDatabase) {
     val changes by db.syncInboxDao().observePending().collectAsState(initial = emptyList())
+    val labels = remember { mutableStateMapOf<String, String>() }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(changes) {
+        for (change in changes) {
+            if (labels.containsKey(change.id)) continue
+            val label = withContext(Dispatchers.IO) { runCatching { conflictLabel(change) }.getOrNull() }
+            if (label != null) labels[change.id] = label
+        }
+    }
     if (changes.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
         Text("تغییرات دریافتی و تعارض‌ها (${changes.size})", fontWeight = FontWeight.Bold)
         changes.forEach { change ->
             Card(colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("${change.entityType} • ${change.entityId} • نسخه سرور ${change.serverVersion}")
+                    Text("${labels[change.id] ?: entityTypeLabel(change.entityType)} • نسخه سرور ${change.serverVersion}")
                     Text(if (change.state == "CONFLICT") "تعارض با تغییر محلی" else "نسخه دریافتی آماده بررسی", color = Muted)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { scope.launch { runCatching { SyncConflictResolver(context, db).acceptServerVersion(change) } } }) { Text("پذیرش نسخه سرور") }

@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BusinessRecordEntity::class
     ],
     version = 7,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class AgroDatabase : RoomDatabase() {
     abstract fun cropObservationDao(): CropObservationDao
