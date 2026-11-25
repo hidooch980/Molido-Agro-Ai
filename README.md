@@ -27,7 +27,7 @@
 - نسخه پایه توسعه در `version.properties` نگهداری می‌شود؛ ساخت‌های CI با پسوند `-dev.RUN_NUMBER` مشخص می‌شوند.
 - نسخه پایدار فقط از Git Tag با قالب `vMAJOR.MINOR.PATCH` و پس از عبور تمام آزمون‌های اجباری منتشر می‌شود.
 - اجرای موفق CI یا ساخت APK به‌تنهایی به معنی آماده‌بودن محصول برای انتشار پایدار نیست.
-- آخرین نسخه منتشرشده: [v0.2.1](https://github.com/hidooch980/Molido-Agro-Ai/releases/tag/v0.2.1) (Pre-release؛ فایل نصب `molido-agro-ai.apk` و مانیفست به‌روزرسانی `latest.json`).
+- آخرین نسخه منتشرشده: [v0.2.2](https://github.com/hidooch980/Molido-Agro-Ai/releases/tag/v0.2.2) (Pre-release؛ فایل نصب `molido-agro-ai.apk` و مانیفست به‌روزرسانی `latest.json`).
 - نسخه‌های 0.x به‌صورت Pre-release منتشر می‌شوند؛ چون مسیر `releases/latest` این نسخه‌ها را شامل نمی‌شود، بررسی به‌روزرسانی داخل برنامه ابتدا همان مسیر و در صورت نبود آن آخرین Tag منتشرشده را از API گیت‌هاب می‌خواند و مانیفست/APK را از `releases/download/<tag>` دریافت می‌کند.
 
 ## ساخت
