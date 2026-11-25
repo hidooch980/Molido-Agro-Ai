@@ -22,6 +22,7 @@ import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.ByteArrayOutputStream
@@ -31,7 +32,12 @@ import java.security.MessageDigest
 
 private const val MAX_UPDATE_BYTES = 100L * 1024L * 1024L
 private const val MAX_MANIFEST_BYTES = 16 * 1024
-private val TRUSTED_DOWNLOAD_HOSTS = setOf("github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com")
+private const val MAX_RELEASES_BYTES = 256 * 1024
+private const val REPOSITORY = "hidooch980/Molido-Agro-Ai"
+private const val STABLE_MANIFEST_URL = "https://github.com/hidooch980/Molido-Agro-Ai/releases/latest/download/latest.json"
+private const val RELEASES_API_URL = "https://api.github.com/repos/hidooch980/Molido-Agro-Ai/releases?per_page=10"
+private val TRUSTED_DOWNLOAD_HOSTS = setOf("github.com", "api.github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com")
+private val TAG_PATTERN = Regex("v[0-9A-Za-z._-]{1,40}")
 
 private fun requireTrustedHttps(connection: HttpURLConnection) {
     require(connection.url.protocol.equals("https", ignoreCase = true)) { "HTTPS is required" }
@@ -73,7 +79,70 @@ private fun matchesInstalledSigner(context: android.content.Context, apk: File):
     return installedDigests.isNotEmpty() && installedDigests == candidateDigests
 }
 
-private data class AvailableUpdate(val versionName: String, val versionCode: Int, val apkFile: String, val sha256: String)
+private data class AvailableUpdate(
+    val versionName: String,
+    val versionCode: Int,
+    val apkFile: String,
+    val sha256: String,
+    /** Release tag the manifest came from; blank means the stable "latest" alias was used. */
+    val tag: String
+)
+
+private fun fetchManifest(url: String): JSONObject {
+    val connection = URL(url).openConnection() as HttpURLConnection
+    connection.connectTimeout = 8000
+    connection.readTimeout = 8000
+    connection.instanceFollowRedirects = true
+    connection.setRequestProperty("Accept", "application/vnd.github+json")
+    connection.setRequestProperty("User-Agent", "MolidoAgroAI")
+    try {
+        check(connection.responseCode == 200) { "manifest unavailable" }
+        requireTrustedHttps(connection)
+        val bytes = connection.inputStream.use { readLimited(it, MAX_MANIFEST_BYTES) }
+        return JSONObject(bytes.toString(Charsets.UTF_8))
+    } finally { connection.disconnect() }
+}
+
+/**
+ * GitHub only exposes pre-releases through the releases API, never through the "latest" alias,
+ * so the newest published tag is read from the API when the stable manifest is missing.
+ */
+private fun latestPublishedTag(): String {
+    val connection = URL(RELEASES_API_URL).openConnection() as HttpURLConnection
+    connection.connectTimeout = 8000
+    connection.readTimeout = 8000
+    connection.instanceFollowRedirects = true
+    connection.setRequestProperty("Accept", "application/vnd.github+json")
+    connection.setRequestProperty("User-Agent", "MolidoAgroAI")
+    try {
+        check(connection.responseCode == 200) { "release list unavailable" }
+        requireTrustedHttps(connection)
+        val bytes = connection.inputStream.use { readLimited(it, MAX_RELEASES_BYTES) }
+        val releases = JSONArray(bytes.toString(Charsets.UTF_8))
+        for (index in 0 until releases.length()) {
+            val release = releases.optJSONObject(index) ?: continue
+            if (release.optBoolean("draft")) continue
+            val tag = release.optString("tag_name")
+            if (TAG_PATTERN.matches(tag)) return tag
+        }
+        error("no published release found")
+    } finally { connection.disconnect() }
+}
+
+private fun parseManifest(json: JSONObject, tag: String): AvailableUpdate {
+    val candidate = AvailableUpdate(
+        versionName = json.getString("versionName"),
+        versionCode = json.getInt("versionCode"),
+        apkFile = json.getString("apkFile"),
+        sha256 = json.getString("sha256").lowercase(),
+        tag = tag
+    )
+    require(candidate.versionCode > 0)
+    require(candidate.versionName.isNotBlank() && candidate.versionName.length <= 64)
+    require(candidate.apkFile == "molido-agro-ai.apk")
+    require(candidate.sha256.matches(Regex("[a-f0-9]{64}")))
+    return candidate
+}
 
 @Composable
 fun UpdateCheckerCard() {
@@ -87,21 +156,13 @@ fun UpdateCheckerCard() {
     LaunchedEffect(Unit) {
         val result = withContext(Dispatchers.IO) {
             runCatching {
-                val connection = URL("https://github.com/hidooch980/Molido-Agro-Ai/releases/latest/download/latest.json").openConnection() as HttpURLConnection
-                connection.connectTimeout = 8000
-                connection.readTimeout = 8000
-                try {
-                    check(connection.responseCode == 200)
-                    requireTrustedHttps(connection)
-                    val manifestBytes = connection.inputStream.use { readLimited(it, MAX_MANIFEST_BYTES) }
-                    val json = JSONObject(manifestBytes.toString(Charsets.UTF_8))
-                    AvailableUpdate(json.getString("versionName"), json.getInt("versionCode"), json.getString("apkFile"), json.getString("sha256").lowercase()).also { candidate ->
-                        require(candidate.versionCode > 0)
-                        require(candidate.versionName.isNotBlank() && candidate.versionName.length <= 64)
-                        require(candidate.apkFile == "molido-agro-ai.apk")
-                        require(candidate.sha256.matches(Regex("[a-f0-9]{64}")))
-                    }
-                } finally { connection.disconnect() }
+                // 0.x builds are GitHub pre-releases, so the stable alias is expected to be
+                // missing; fall back to the newest published tag instead of showing an error.
+                val resolved = runCatching { "" to fetchManifest(STABLE_MANIFEST_URL) }.getOrElse {
+                    val tag = latestPublishedTag()
+                    tag to fetchManifest("https://github.com/$REPOSITORY/releases/download/$tag/latest.json")
+                }
+                parseManifest(resolved.second, resolved.first)
             }
         }
         result.onSuccess { candidate ->
@@ -125,7 +186,12 @@ fun UpdateCheckerCard() {
                         val result = withContext(Dispatchers.IO) {
                             runCatching {
                                 require(candidate.apkFile.matches(Regex("[A-Za-z0-9._-]+\\.apk")))
-                                val connection = URL("https://github.com/hidooch980/Molido-Agro-Ai/releases/latest/download/${candidate.apkFile}").openConnection() as HttpURLConnection
+                                val downloadUrl = if (candidate.tag.isBlank()) {
+                                    "https://github.com/$REPOSITORY/releases/latest/download/${candidate.apkFile}"
+                                } else {
+                                    "https://github.com/$REPOSITORY/releases/download/${candidate.tag}/${candidate.apkFile}"
+                                }
+                                val connection = URL(downloadUrl).openConnection() as HttpURLConnection
                                 connection.connectTimeout = 15000
                                 connection.readTimeout = 30000
                                 connection.instanceFollowRedirects = true
