@@ -73,7 +73,8 @@ object LocalBackup {
         } finally {
             sqlite.endTransaction()
         }
-        database.invalidationTracker.refreshAsync()
+        // Room installs per-table triggers that log these writes, so every observer refreshes
+        // without an explicit invalidation call.
         restored
     }
 
