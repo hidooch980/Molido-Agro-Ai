@@ -60,6 +60,9 @@ class DatabaseEncryptionTest {
         android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(file, null).use { legacy ->
             legacy.execSQL("CREATE TABLE notes (value TEXT)")
             legacy.execSQL("INSERT INTO notes (value) VALUES ('old')")
+            // A real pre-encryption database carries a user_version; without it the helper would
+            // treat the file as empty and run onCreate again on a table that already exists.
+            legacy.version = 1
         }
         assertTrue(DatabaseEncryption.isLegacyPlaintext(file))
 
