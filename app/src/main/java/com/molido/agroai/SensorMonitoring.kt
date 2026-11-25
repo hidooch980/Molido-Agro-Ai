@@ -11,7 +11,9 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import com.molido.agroai.data.GreenhouseEntity
+import com.molido.agroai.data.ServerConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -35,11 +37,12 @@ fun SensorMonitoringPage(greenhouses: List<GreenhouseEntity>, token: String?) {
     var loading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("برای مشاهده داده‌های سنسورها، حساب کاربری و سرور را متصل کنید.") }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val base = ServerConfig.baseUrl(context)
 
     fun refresh() {
         if (token.isNullOrBlank()) { message = "برای مشاهده پایش سنسورها ابتدا وارد حساب شوید."; return }
-        if (!base.startsWith("https://")) { message = "آدرس HTTPS سرور محلی در تنظیمات نسخه برنامه تعریف نشده است."; return }
+        if (!base.startsWith("https://") && !base.startsWith("http://")) { message = "آدرس سرور تنظیم نشده است؛ آن را در بخش «اتصال به سرور» وارد کنید."; return }
         loading = true
         message = "در حال دریافت وضعیت و تاریخچه سنسورها..."
         scope.launch {
