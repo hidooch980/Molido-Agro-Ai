@@ -43,6 +43,9 @@ interface SyncOperationDao {
     @Query("SELECT COUNT(*) FROM sync_operations WHERE state = 'PENDING'")
     fun observePendingCount(): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM sync_operations WHERE state IN ('PENDING', 'CONFLICT')")
+    suspend fun outstandingCount(): Int
+
     @Query("UPDATE sync_operations SET state = 'SYNCED', lastError = NULL WHERE id = :id")
     suspend fun markSynced(id: String)
 

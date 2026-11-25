@@ -115,7 +115,7 @@ private fun AgroApp() {
             }
             UpdateCheckerCard()
             ServerPanel(context)
-            AuthPanel(context, db) {
+            AuthPanel(context, db, boundAccount) {
                 authRevision += 1
                 scope.launch {
                     currentUser = withContext(Dispatchers.IO) { SessionStore(context).userId() }
@@ -314,7 +314,7 @@ private fun ServerPanel(context: android.content.Context) {
 }
 
 @Composable
-private fun AuthPanel(context: android.content.Context, db: AgroDatabase, onAuthChanged: () -> Unit) {
+private fun AuthPanel(context: android.content.Context, db: AgroDatabase, boundAccount: String?, onAuthChanged: () -> Unit) {
     val scope = rememberCoroutineScope()
     val session = remember(context) { SessionStore(context) }
     var user by remember { mutableStateOf("") }
@@ -330,8 +330,58 @@ private fun AuthPanel(context: android.content.Context, db: AgroDatabase, onAuth
         }
     }
     var busy by remember { mutableStateOf(false) }
+    var switchPreview by remember { mutableStateOf<AccountSwitch.Preview?>(null) }
+    var switching by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
         Text(status, color = Muted, style = MaterialTheme.typography.bodySmall)
+        if (boundAccount != null && boundAccount != session.userId()) {
+            val label = if (boundAccount.startsWith(LOCAL_PROFILE_PREFIX)) "پروفایل محلی" else boundAccount
+            Text(
+                "این دستگاه به «$label» متصل است و برای جلوگیری از افشای داده‌ها، ورود حساب دیگر مسدود می‌شود.",
+                color = Muted,
+                style = MaterialTheme.typography.bodySmall
+            )
+            val preview = switchPreview
+            if (preview == null) {
+                OutlinedButton(enabled = !switching, onClick = {
+                    switching = true
+                    scope.launch {
+                        switchPreview = withContext(Dispatchers.IO) {
+                            runCatching { AccountSwitch.preview(context, db, BusinessLocalStore.get(context)) }.getOrNull()
+                        }
+                        switching = false
+                    }
+                }) { Text(if (switching) "در حال بررسی داده‌های محلی…" else "تغییر حساب این دستگاه") }
+            } else {
+                val pending = when {
+                    !preview.hasUnsyncedWork -> ""
+                    else -> " این پاک‌سازی شامل ${preview.outstandingSyncOperations} عملیات همگام‌نشده و ${preview.pendingBusinessRecords} رکورد CRM/ERP در انتظار ارسال هم می‌شود."
+                }
+                Text(
+                    "همه داده‌های محلی این دستگاه پاک می‌شود و این کار بازگشت‌پذیر نیست.$pending پیش از ادامه، در صورت نیاز از بخش پشتیبان‌گیری نسخه تهیه کنید.",
+                    color = Color(0xFFFFD180),
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(enabled = !switching, onClick = {
+                        switching = true
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching { AccountSwitch.switchAccount(context, db, BusinessLocalStore.get(context)) }
+                            }
+                            status = result.fold(
+                                { "داده‌های محلی پاک شد؛ اکنون می‌توانید وارد حساب جدید شوید یا پروفایل محلی بسازید." },
+                                { it.message ?: "پاک‌سازی ناموفق بود." }
+                            )
+                            switchPreview = null
+                            switching = false
+                            onAuthChanged()
+                        }
+                    }) { Text("پاک کردن و تغییر حساب") }
+                    OutlinedButton(enabled = !switching, onClick = { switchPreview = null }) { Text("انصراف") }
+                }
+            }
+        }
         OutlinedTextField(user, { user = it }, label = { Text("نام کاربری") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(password, { password = it }, label = { Text("گذرواژه (حداقل ۱۲ نویسه)") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

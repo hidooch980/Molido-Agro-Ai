@@ -43,6 +43,9 @@ interface BusinessLocalDao {
 
     @Query("SELECT COUNT(*) FROM business_local_records WHERE accountId = :accountId AND syncState = 'PENDING'")
     fun pendingCount(accountId: String): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM business_local_records WHERE accountId = :accountId AND syncState = 'PENDING'")
+    suspend fun countPending(accountId: String): Int
 }
 
 @Database(entities = [BusinessLocalRecord::class], version = 1, exportSchema = false)
