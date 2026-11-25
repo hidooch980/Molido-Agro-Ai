@@ -92,6 +92,12 @@ private fun AgroApp() {
     val balance by db.financeDao().observeBalance().collectAsState(initial = 0.0)
     val businessRecords by db.businessRecordDao().observeAll().collectAsState(initial = emptyList())
     var tab by remember { mutableStateOf(Tab.HOME) }
+    // Reading the access token touches the Keystore, which must never happen during composition.
+    var accessToken by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(tab, authRevision, sessionTick) {
+        if (tab != Tab.SENSORS) return@LaunchedEffect
+        accessToken = withContext(Dispatchers.IO) { SessionStore(context).accessToken() }
+    }
     var notice by remember { mutableStateOf("ذخیره‌سازی محلی فعال است؛ برای ثبت اطلاعات نیازی به اینترنت نیست.") }
 
     Scaffold(containerColor = Forest, bottomBar = {
@@ -127,7 +133,7 @@ private fun AgroApp() {
                 Tab.GREENHOUSE -> GreenhousePage(greenhouses, onSave = { n, a, l ->
                     scope.launch { try { val id = UUID.randomUUID().toString(); val item = GreenhouseEntity(id, n.trim(), a, l.trim()); val payload = JSONObject().put("id", id).put("name", item.name).put("areaSquareMeters", a).put("location", item.location).put("cultivationMethod", item.cultivationMethod).toString(); db.insertAndEnqueue(context, "greenhouse", id, payload) { db.greenhouseDao().insert(item) }; notice = "گلخانه ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت ناموفق؛ نام گلخانه باید یکتا باشد." } }
                 }, onUpdate = { item -> scope.launch { try { val payload = JSONObject().put("id", item.id).put("name", item.name).put("areaSquareMeters", item.areaSquareMeters).put("location", item.location).put("cultivationMethod", item.cultivationMethod).put("createdAtEpochMillis", item.createdAtEpochMillis).put("isActive", item.isActive).toString(); db.updateAndEnqueue(context, "greenhouse", item.id, payload) { db.greenhouseDao().upsert(item) }; notice = "گلخانه ویرایش شد." } catch (_: Exception) { notice = "ویرایش گلخانه ناموفق بود." } } }, onDelete = { id -> scope.launch { db.deleteAndEnqueue(context, "greenhouse", id) { db.greenhouseDao().deleteById(id) }; notice = "گلخانه حذف شد." } })
-                Tab.SENSORS -> SensorMonitoringPage(greenhouses, SessionStore(context).accessToken())
+                Tab.SENSORS -> SensorMonitoringPage(greenhouses, accessToken)
                 Tab.CROP -> CropPage(greenhouses, cycles, onSave = { g, c, a, p, n ->
                     scope.launch { try { val id = UUID.randomUUID().toString(); val item = CropCycleEntity(id, g, c, System.currentTimeMillis(), null, a, p, notes = n); val payload = JSONObject().put("id", id).put("greenhouseId", g).put("cropCode", c).put("plantedAreaSquareMeters", a).put("plantCount", p).put("status", item.status).put("notes", n).put("startDateEpochMillis", item.startDateEpochMillis).toString(); db.insertAndEnqueue(context, "crop_cycle", id, payload) { db.cropCycleDao().insert(item) }; notice = "دوره کشت ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت دوره کشت ناموفق بود." } }
                 }, onUpdate = { item -> scope.launch { try { val payload = JSONObject().put("id", item.id).put("greenhouseId", item.greenhouseId).put("cropCode", item.cropCode).put("plantedAreaSquareMeters", item.plantedAreaSquareMeters).put("plantCount", item.plantCount).put("status", item.status).put("notes", item.notes).put("startDateEpochMillis", item.startDateEpochMillis).put("expectedHarvestDateEpochMillis", item.expectedHarvestDateEpochMillis).toString(); db.updateAndEnqueue(context, "crop_cycle", item.id, payload) { db.cropCycleDao().upsert(item) }; notice = "دوره کشت ویرایش شد." } catch (_: Exception) { notice = "ویرایش دوره کشت ناموفق بود." } } }, onDelete = { id -> scope.launch { db.deleteAndEnqueue(context, "crop_cycle", id) { db.cropCycleDao().deleteById(id) }; notice = "دوره کشت حذف شد." } })
