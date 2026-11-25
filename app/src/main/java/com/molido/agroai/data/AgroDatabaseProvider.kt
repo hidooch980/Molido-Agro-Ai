@@ -13,7 +13,8 @@ object AgroDatabaseProvider {
                 context.applicationContext,
                 AgroDatabase::class.java,
                 "molido_agro_local.db"
-            ).addMigrations(AgroDatabase.MIGRATION_1_2, AgroDatabase.MIGRATION_2_3, AgroDatabase.MIGRATION_3_4, AgroDatabase.MIGRATION_4_5, AgroDatabase.MIGRATION_5_6, AgroDatabase.MIGRATION_6_7)
+            ).openHelperFactory(DatabaseEncryption.factory(context))
+                .addMigrations(AgroDatabase.MIGRATION_1_2, AgroDatabase.MIGRATION_2_3, AgroDatabase.MIGRATION_3_4, AgroDatabase.MIGRATION_4_5, AgroDatabase.MIGRATION_5_6, AgroDatabase.MIGRATION_6_7)
                 .build()
                 .also { instance = it }
         }

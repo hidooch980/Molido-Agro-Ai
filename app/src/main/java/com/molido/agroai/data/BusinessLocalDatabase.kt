@@ -57,6 +57,7 @@ object BusinessLocalStore {
             context.applicationContext,
             BusinessLocalDatabase::class.java,
             "molido-business-local.db"
-        ).build().also { instance = it }
+        ).openHelperFactory(DatabaseEncryption.factory(context))
+            .build().also { instance = it }
     }
 }

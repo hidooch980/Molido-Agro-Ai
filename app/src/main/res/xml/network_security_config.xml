@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Release builds trust only the platform system store and never cleartext HTTP.
-  Debug builds additionally accept a user-installed CA so a self-hosted LAN
-  server behind a private CA (see docs/LAN_DEPLOYMENT_AND_RECOVERY.md) can be
-  tested without breaking production trust. debug-overrides is ignored in
-  release builds, so shipping a private CA in the APK is never required.
+  Release builds trust only the platform system store. Cleartext HTTP stays blocked everywhere
+  except the loopback addresses, which let an operator reach a server running on the same
+  device or through an adb reverse tunnel without weakening the LAN/production policy.
+  Debug builds additionally accept a user-installed CA so a self-hosted LAN server behind a
+  private CA (see docs/LAN_DEPLOYMENT_AND_RECOVERY.md) can be tested; debug-overrides is
+  ignored in release builds, so shipping a private CA in the APK is never required.
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false">
@@ -12,6 +13,10 @@
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
     <debug-overrides>
         <trust-anchors>
             <certificates src="system" />

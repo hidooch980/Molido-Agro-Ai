@@ -125,6 +125,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+    // SQLCipher: at-rest encryption for the local databases (new databases only, see
+    // DatabaseEncryption for why legacy plaintext files are left untouched).
+    implementation("net.zetetic:sqlcipher-android:4.6.1")
+    implementation("androidx.sqlite:sqlite-framework:2.4.0")
     ksp("androidx.room:room-compiler:2.6.1")
     implementation("androidx.datastore:datastore-preferences:1.1.2")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
