@@ -130,7 +130,10 @@ private fun AgroApp() {
                 SyncInboxPanel(context, db)
                 BackupPanel(context, db)
                 when (tab) {
-                Tab.HOME -> HomePage(greenhouses.size, cycles.count { it.status == "ACTIVE" }, activities.size, stock.size, balance, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
+                Tab.HOME -> {
+                    HomePage(greenhouses.size, cycles.count { it.status == "ACTIVE" }, activities.size, stock.size, balance, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
+                    DiagnosisPanel(context)
+                }
                 Tab.GREENHOUSE -> GreenhousePage(greenhouses, onSave = { n, a, l ->
                     scope.launch { try { val id = UUID.randomUUID().toString(); val item = GreenhouseEntity(id, n.trim(), a, l.trim()); val payload = JSONObject().put("id", id).put("name", item.name).put("areaSquareMeters", a).put("location", item.location).put("cultivationMethod", item.cultivationMethod).toString(); db.insertAndEnqueue(context, "greenhouse", id, payload) { db.greenhouseDao().insert(item) }; notice = "گلخانه ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت ناموفق؛ نام گلخانه باید یکتا باشد." } }
                 }, onUpdate = { item -> scope.launch { try { val payload = JSONObject().put("id", item.id).put("name", item.name).put("areaSquareMeters", item.areaSquareMeters).put("location", item.location).put("cultivationMethod", item.cultivationMethod).put("createdAtEpochMillis", item.createdAtEpochMillis).put("isActive", item.isActive).toString(); db.updateAndEnqueue(context, "greenhouse", item.id, payload) { db.greenhouseDao().upsert(item) }; notice = "گلخانه ویرایش شد." } catch (_: Exception) { notice = "ویرایش گلخانه ناموفق بود." } } }, onDelete = { id -> scope.launch { db.deleteAndEnqueue(context, "greenhouse", id) { db.greenhouseDao().deleteById(id) }; notice = "گلخانه حذف شد." } })
