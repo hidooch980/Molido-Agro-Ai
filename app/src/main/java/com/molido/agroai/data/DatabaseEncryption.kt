@@ -41,11 +41,12 @@ object DatabaseEncryption {
 
     private class Factory(private val context: Context) : SupportSQLiteOpenHelper.Factory {
         override fun create(configuration: SupportSQLiteOpenHelper.Configuration): SupportSQLiteOpenHelper {
-            if (isLegacyPlaintext(context.getDatabasePath(configuration.name))) {
+            val name = configuration.name
+            if (name != null && isLegacyPlaintext(context.getDatabasePath(name))) {
                 // Best effort: copy the plaintext rows into an encrypted database and verify the
                 // copy before swapping. Until that succeeds the file must stay plaintext, so a
                 // failure keeps the framework helper.
-                if (!LegacyDatabaseEncryption.migrate(context, configuration.name)) {
+                if (!LegacyDatabaseEncryption.migrate(context, name)) {
                     return FrameworkSQLiteOpenHelperFactory().create(configuration)
                 }
             }

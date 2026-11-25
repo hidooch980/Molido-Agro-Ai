@@ -55,7 +55,7 @@ object LegacyDatabaseEncryption {
             val targetHelper = encryptedHelper(context, copyName, version, key)
             try {
                 val target = targetHelper.writableDatabase
-                target.rawExecSQL("PRAGMA foreign_keys = OFF")
+                target.execSQL("PRAGMA foreign_keys = OFF")
                 for (statement in schema) target.execSQL(statement)
                 for (table in tables) copyRows(source, target, table)
                 target.version = version
