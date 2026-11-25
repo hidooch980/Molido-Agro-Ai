@@ -410,6 +410,23 @@ jobs:
               }, f, ensure_ascii=False, indent=2)
           PY
 
+      - name: Delete stale draft releases for this tag
+        # A publish that stops halfway leaves a draft behind, and a draft plus a published
+        # release for the same tag makes the release API reject the update with
+        # "already_exists: tag_name". Remove those drafts before publishing.
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          stale="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq ".[] | select(.draft and .tag_name == \"${TAG}\") | .id")"
+          for id in $stale; do
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}"
+            echo "Deleted stale draft release ${id}"
+          done
+
       - name: Publish signed GitHub Release
         uses: softprops/action-gh-release@v2
         with:
