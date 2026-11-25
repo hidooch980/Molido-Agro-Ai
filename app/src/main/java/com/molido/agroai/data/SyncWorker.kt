@@ -56,6 +56,9 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
             dueRetry(dao, e)
             Result.retry()
         } catch (e: SecurityException) {
+            // The stored token was rejected, so drop it now; otherwise the account panel keeps
+            // claiming a live session while every scheduled sync fails silently.
+            SessionStore(applicationContext).clear()
             Result.failure()
         } catch (e: Exception) {
             dueRetry(dao, e)
@@ -152,6 +155,7 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val projector = SyncProjector(db)
         var rounds = 0
         while (rounds < MAX_PULL_ROUNDS) {
+            val pageStartCursor = newestCursor
             val body = JSONObject().put("cursor", newestCursor).put("limit", PULL_PAGE_SIZE).toString()
             val response = JSONObject(request("$base/v1/sync/pull", token, body))
             val changes = response.optJSONArray("changes") ?: JSONArray()
@@ -199,6 +203,8 @@ class AgroSyncWorker(context: Context, params: WorkerParameters) : CoroutineWork
             val serverCursor = response.optLong("cursor", newestCursor)
             newestCursor = maxOf(newestCursor, serverCursor)
             if (changes.length() < PULL_PAGE_SIZE) break
+            // A server that echoes the same cursor would otherwise replay this page on every run.
+            if (newestCursor == pageStartCursor) break
         }
         if (newestCursor != startCursor) {
             check(prefs.edit().putLong("remote_cursor", newestCursor).commit())

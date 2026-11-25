@@ -32,7 +32,20 @@ private val Muted = Color(0xFFB8C8BE)
 
 private enum class Tab(val title: String) { HOME("خانه"), GREENHOUSE("گلخانه"), SENSORS("پایش"), CROP("کشت"), LOG("عملیات"), STOCK("انبار"), MONEY("مالی"), BUSINESS("CRM/ERP") }
 
+/**
+ * Bumped every time the activity resumes so the session chip re-reads the stored account: a
+ * rejected token is cleared in the background, and the panel must stop claiming a live session.
+ */
+private object SessionRefresh {
+    var tick by mutableIntStateOf(0)
+}
+
 class MainActivity : ComponentActivity() {
+    override fun onResume() {
+        super.onResume()
+        SessionRefresh.tick += 1
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -62,6 +75,12 @@ private fun AgroApp() {
         boundAccount = withContext(Dispatchers.IO) { db.appMetadataDao().value("bound_account_id") }
         accountStateLoaded = true
         currentUser = withContext(Dispatchers.IO) { SessionStore(context).userId() }
+    }
+    val sessionTick = SessionRefresh.tick
+    LaunchedEffect(sessionTick, accountStateLoaded) {
+        if (!accountStateLoaded) return@LaunchedEffect
+        val sessionUser = withContext(Dispatchers.IO) { SessionStore(context).userId() }
+        if (sessionUser != currentUser) currentUser = sessionUser
     }
     val greenhouses by db.greenhouseDao().observeAll().collectAsState(initial = emptyList())
     val cycles by db.cropCycleDao().observeAll().collectAsState(initial = emptyList())

@@ -60,6 +60,7 @@ class BusinessOutboxWorker(context: Context, params: WorkerParameters) : Corouti
             }
             Result.success()
         } catch (_: SecurityException) {
+            SessionStore(applicationContext).clear()
             Result.failure()
         } catch (_: Exception) {
             Result.retry()
