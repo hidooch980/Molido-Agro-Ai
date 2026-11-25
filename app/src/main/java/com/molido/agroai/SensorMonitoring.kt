@@ -14,7 +14,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import com.molido.agroai.data.SensorReadingsApi
-import com.molido.agroai.domain.ManualReadingValidationimport androidx.compose.ui.platform.LocalContext
+import com.molido.agroai.domain.ManualReadingValidation
+import androidx.compose.ui.platform.LocalContext
 import com.molido.agroai.data.GreenhouseEntity
 import com.molido.agroai.data.ServerConfig
 import kotlinx.coroutines.Dispatchers
