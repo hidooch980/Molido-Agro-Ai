@@ -2,7 +2,9 @@ package com.molido.agroai
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -119,6 +121,7 @@ private fun AgroApp() {
                 PanelCard("اطلاعات این دستگاه به حساب دیگری متصل است. برای مشاهده اطلاعات خصوصی، با همان حساب وارد شوید.")
             } else {
                 SyncInboxPanel(context, db)
+                BackupPanel(context, db)
                 when (tab) {
                 Tab.HOME -> HomePage(greenhouses.size, cycles.count { it.status == "ACTIVE" }, activities.size, stock.size, balance, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
                 Tab.GREENHOUSE -> GreenhousePage(greenhouses, onSave = { n, a, l ->
@@ -170,6 +173,52 @@ private fun conflictLabel(change: SyncInboxEntity): String {
     val title = listOf("name", "title", "subject", "cropCode")
         .firstNotNullOfOrNull { key -> payload.optString(key).takeIf { it.isNotBlank() } }
     return entityTypeLabel(change.entityType) + " • " + (title ?: change.entityId.take(8))
+}
+
+@Composable
+private fun BackupPanel(context: android.content.Context, db: AgroDatabase) {
+    val scope = rememberCoroutineScope()
+    var status by remember { mutableStateOf("پشتیبان‌گیری رمزگذاری‌شده از همه اطلاعات همین دستگاه.") }
+    var busy by remember { mutableStateOf(false) }
+    val createBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        busy = true
+        scope.launch {
+            status = runCatching {
+                val snapshot = LocalBackup.export(context, db)
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(snapshot.toByteArray(Charsets.UTF_8)) }
+                        ?: error("نوشتن فایل ممکن نشد")
+                }
+                "فایل پشتیبان ساخته و ذخیره شد."
+            }.getOrElse { "ساخت پشتیبان ناموفق بود: ${it.message}" }
+            busy = false
+        }
+    }
+    val openBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        busy = true
+        scope.launch {
+            status = runCatching {
+                val saved = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                        ?: error("خواندن فایل ممکن نشد")
+                }
+                val rows = LocalBackup.restore(context, db, saved)
+                "بازیابی کامل شد: $rows ردیف بازگردانی شد."
+            }.getOrElse { "بازیابی ناموفق بود: ${it.message}" }
+            busy = false
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
+        Text("پشتیبان‌گیری و بازیابی", fontWeight = FontWeight.Bold)
+        Text(status, color = Muted, style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(enabled = !busy, onClick = { createBackup.launch("molido-agro-backup.json") }) { Text("ساخت فایل پشتیبان") }
+            OutlinedButton(enabled = !busy, onClick = { openBackup.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Text("بازیابی از فایل") }
+        }
+        Text("بازیابی، اطلاعات فعلی این دستگاه را با محتوای فایل جایگزین می‌کند.", color = Muted, style = MaterialTheme.typography.bodySmall)
+    }
 }
 
 @Composable
