@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.molido.agroai.data.DiseaseDiagnosisApi
+import com.molido.agroai.data.GreenhouseEntity
 import com.molido.agroai.domain.CropCatalog
 import com.molido.agroai.domain.DiagnosisReport
 import com.molido.agroai.domain.PlantDiseaseCatalog
@@ -40,8 +41,9 @@ private val DiagnosisCrops = listOf("cucumber", "tomato", "pepper", "strawberry"
 
 /** Rule-based symptom triage with an optional server-side IPM enrichment. */
 @Composable
-fun DiagnosisPanel(context: Context) {
+fun DiagnosisPanel(context: Context, greenhouses: List<GreenhouseEntity> = emptyList()) {
     var cropCode by remember { mutableStateOf(DiagnosisCrops.first()) }
+    var greenhouseId by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf(emptySet<SymptomSignal>()) }
     var status by remember { mutableStateOf("نشانه‌های مشاهده‌شده روی بوته را انتخاب کنید.") }
     var report by remember { mutableStateOf<DiagnosisReport?>(null) }
@@ -78,6 +80,25 @@ fun DiagnosisPanel(context: Context) {
                         label = { Text(name) },
                         modifier = Modifier.fillMaxWidth()
                     )
+                }
+            }
+            if (greenhouses.isNotEmpty()) {
+                Text("گلخانه (برای هشدار اقلیمی)", color = DiagnosisMuted, style = MaterialTheme.typography.bodySmall)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(
+                        selected = greenhouseId == null,
+                        onClick = { greenhouseId = null },
+                        label = { Text("بدون گلخانه") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    for (greenhouse in greenhouses) {
+                        FilterChip(
+                            selected = greenhouseId == greenhouse.id,
+                            onClick = { greenhouseId = greenhouse.id },
+                            label = { Text(greenhouse.name) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
             Text("نشانه‌ها", color = DiagnosisMuted, style = MaterialTheme.typography.bodySmall)
@@ -118,7 +139,7 @@ fun DiagnosisPanel(context: Context) {
                                     adviceNote = "توصیه تکمیلی سرور برای این بیماری موجود نیست؛ توصیه‌های کاتالوگ محلی نمایش داده شد."
                                 } else {
                                     val notes = triage.matched.joinToString("، ") { it.label }
-                                    advice = DiseaseDiagnosisApi.diagnose(context, cropCode, conditionId, triage.confidence, notes)
+                                    advice = DiseaseDiagnosisApi.diagnose(context, cropCode, conditionId, triage.confidence, notes, greenhouseId)
                                     if (advice == null) {
                                         adviceNote = "سرور همگام‌سازی در دسترس نیست؛ ارزیابی محلی معتبر است."
                                     }

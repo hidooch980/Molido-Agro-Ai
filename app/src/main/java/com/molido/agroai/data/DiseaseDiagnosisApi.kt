@@ -34,7 +34,8 @@ object DiseaseDiagnosisApi {
         cropCode: String,
         diseaseId: String,
         confidence: Double,
-        notes: String
+        notes: String,
+        greenhouseId: String? = null
     ): Advice? = withContext(Dispatchers.IO) {
         if (!isSupported(diseaseId)) return@withContext null
         val base = ServerConfig.baseUrl(context)
@@ -55,6 +56,7 @@ object DiseaseDiagnosisApi {
                     .put("diseaseId", diseaseId)
                     .put("confidence", confidence)
                     .put("notes", notes.take(1000))
+                    .apply { if (!greenhouseId.isNullOrBlank()) put("greenhouseId", greenhouseId) }
                     .toString()
                 OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(body) }
                 val code = connection.responseCode

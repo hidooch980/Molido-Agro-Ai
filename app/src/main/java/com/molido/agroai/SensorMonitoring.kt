@@ -10,8 +10,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.KeyboardOptions
+import com.molido.agroai.data.SensorReadingsApi
+import com.molido.agroai.domain.ManualReadingValidationimport androidx.compose.ui.platform.LocalContext
 import com.molido.agroai.data.GreenhouseEntity
 import com.molido.agroai.data.ServerConfig
 import kotlinx.coroutines.Dispatchers
@@ -118,9 +121,92 @@ fun SensorMonitoringPage(greenhouses: List<GreenhouseEntity>, token: String?) {
                     } else if (status?.state == "NO_DATA") {
                         Text("برای رسم نمودار هنوز اندازه‌گیری ثبت نشده است.", color = Color.LightGray)
                     }
+                    ManualReadingForm(greenhouse, token, onUploaded = { refresh() })
                 }
             }
         }
+    }
+}
+
+
+@Composable
+private fun ManualReadingForm(
+    greenhouse: GreenhouseEntity,
+    token: String?,
+    onUploaded: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var temperature by remember { mutableStateOf("") }
+    var humidity by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    if (!expanded) {
+        OutlinedButton(onClick = { expanded = true }) { Text("ثبت قرائت دستی (بدون گیت‌وی)") }
+        return
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("قرائت دستی دما و رطوبت", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "این مقدار به‌عنوان اندازه‌گیری دستی (MANUAL) روی سرور ثبت می‌شود و پس از ثبت، نمودار همین گلخانه به‌روز می‌شود.",
+            color = Color.LightGray,
+            style = MaterialTheme.typography.bodySmall
+        )
+        OutlinedTextField(
+            value = temperature,
+            onValueChange = { temperature = it; status = "" },
+            label = { Text("دما (°C)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = humidity,
+            onValueChange = { humidity = it; status = "" },
+            label = { Text("رطوبت نسبی (٪)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Button(
+                enabled = !busy,
+                onClick = {
+                    val validation = ManualReadingValidation.parse(temperature, humidity)
+                    if (!validation.isValid) {
+                        status = validation.errors.joinToString("\n")
+                        return@Button
+                    }
+                    busy = true
+                    status = "در حال ارسال…"
+                    scope.launch {
+                        val outcome = SensorReadingsApi.submit(
+                            context = context,
+                            token = token,
+                            greenhouseId = greenhouse.id,
+                            temperatureC = validation.temperatureC!!,
+                            humidityPct = validation.humidityPct!!
+                        )
+                        status = outcome.message
+                        if (outcome.ok) {
+                            temperature = ""
+                            humidity = ""
+                            onUploaded()
+                        }
+                        busy = false
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) { Text(if (busy) "در حال ارسال…" else "ثبت قرائت") }
+            OutlinedButton(
+                onClick = { expanded = false; status = "" },
+                modifier = Modifier.weight(1f)
+            ) { Text("بستن") }
+        }
+        if (status.isNotEmpty()) Text(status, color = Color(0xFFFFD180), style = MaterialTheme.typography.bodySmall)
     }
 }
 
