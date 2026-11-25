@@ -115,7 +115,7 @@ private fun AgroApp() {
             }
             UpdateCheckerCard()
             ServerPanel(context)
-            AuthPanel(context) {
+            AuthPanel(context, db) {
                 authRevision += 1
                 scope.launch {
                     currentUser = withContext(Dispatchers.IO) { SessionStore(context).userId() }
@@ -311,15 +311,20 @@ private fun ServerPanel(context: android.content.Context) {
 }
 
 @Composable
-private fun AuthPanel(context: android.content.Context, onAuthChanged: () -> Unit) {
+private fun AuthPanel(context: android.content.Context, db: AgroDatabase, onAuthChanged: () -> Unit) {
     val scope = rememberCoroutineScope()
     val session = remember(context) { SessionStore(context) }
     var user by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("در حال بررسی وضعیت حساب…") }
     LaunchedEffect(session) {
-        status = withContext(Dispatchers.IO) { session.userId() }
-            ?.let { "حساب متصل: $it" } ?: "برای همگام‌سازی، وارد حساب شوید یا حساب بسازید."
+        status = withContext(Dispatchers.IO) {
+            when {
+                session.isLocalProfile() -> "حالت محلی فعال است (بدون سرور)؛ داده‌ها فقط روی همین دستگاه ذخیره می‌شوند."
+                session.userId() != null -> "حساب متصل: ${session.userId()}"
+                else -> "برای همگام‌سازی، وارد حساب شوید یا حساب بسازید؛ بدون سرور هم پروفایل محلی ممکن است."
+            }
+        }
     }
     var busy by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
@@ -363,12 +368,40 @@ private fun AuthPanel(context: android.content.Context, onAuthChanged: () -> Uni
                     }
                 }
             }) { Text("ساخت حساب") }
+            OutlinedButton(enabled = !busy, onClick = {
+                busy = true
+                scope.launch {
+                    status = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val bound = db.appMetadataDao().value("bound_account_id")
+                            when {
+                                session.userId() != null -> "این دستگاه از قبل حساب فعال دارد."
+                                bound != null && bound.startsWith(LOCAL_PROFILE_PREFIX) -> {
+                                    session.saveLocalProfile(bound)
+                                    "حالت محلی دوباره فعال شد؛ داده‌ها فقط روی همین دستگاه می‌مانند."
+                                }
+                                bound != null -> "این دستگاه به حساب دیگری متصل است؛ برای دیدن داده‌ها با همان حساب وارد شوید."
+                                else -> {
+                                    val id = LOCAL_PROFILE_PREFIX + java.util.UUID.randomUUID()
+                                    db.bindToAccount(id)
+                                    session.saveLocalProfile(id)
+                                    "پروفایل محلی ساخته شد؛ همه داده‌ها بدون سرور و فقط روی همین دستگاه ذخیره می‌شوند."
+                                }
+                            }
+                        }.getOrElse { "ساخت پروفایل محلی ناموفق بود: ${it.message}" }
+                    }
+                    busy = false
+                    onAuthChanged()
+                }
+            }) { Text("شروع بدون سرور") }
             if (session.userId() != null) {
                 TextButton(onClick = { AuthRepository(context).signOut(); status = "از حساب خارج شدید."; onAuthChanged() }) { Text("خروج") }
             }
         }
     }
 }
+
+private const val LOCAL_PROFILE_PREFIX = "local-"
 
 private fun tabIcon(t: Tab) = when (t) { Tab.HOME -> "⌂"; Tab.GREENHOUSE -> "🏡"; Tab.SENSORS -> "🌡"; Tab.CROP -> "🌱"; Tab.LOG -> "☑"; Tab.STOCK -> "▣"; Tab.MONEY -> "◉"; Tab.BUSINESS -> "CRM" }
 

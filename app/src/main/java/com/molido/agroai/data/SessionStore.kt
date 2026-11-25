@@ -14,6 +14,7 @@ import javax.crypto.spec.GCMParameterSpec
 class SessionStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("molido_secure_session", Context.MODE_PRIVATE)
     private val alias = "molido.session.aes.v1"
+    private val KEY_LOCAL_PROFILE = "local_profile"
 
     /**
      * Keystore decrypt operations can take seconds on a cold, software-emulated device, so a
@@ -28,8 +29,23 @@ class SessionStore(context: Context) {
         require(token.isNotBlank() && userId.isNotBlank())
         saveSecret("access_token", token)
         saveSecret("user_id", userId)
+        prefs.edit().putBoolean(KEY_LOCAL_PROFILE, false).commit()
     }
-    fun accessToken(): String? = readSecret("access_token")
+
+    /**
+     * A device-only profile: the user owns the local data without any server account. It stores
+     * only the id, so the sync workers see no token and stay idle instead of sending empty requests.
+     */
+    fun saveLocalProfile(userId: String) {
+        require(userId.isNotBlank() && userId.length <= 128)
+        saveSecret("user_id", userId)
+        prefs.edit().remove("access_token").putBoolean(KEY_LOCAL_PROFILE, true).commit()
+        cache().remove("access_token")
+    }
+
+    fun isLocalProfile(): Boolean = prefs.getBoolean(KEY_LOCAL_PROFILE, false)
+
+    fun accessToken(): String? = if (isLocalProfile()) null else readSecret("access_token")
     fun userId(): String? = readSecret("user_id")
     fun clear() {
         prefs.edit().clear().apply()
