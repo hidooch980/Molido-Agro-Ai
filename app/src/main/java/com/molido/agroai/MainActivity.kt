@@ -114,6 +114,7 @@ private fun AgroApp() {
                 Text(notice, color = Color(0xFF9BE0B1), style = MaterialTheme.typography.bodySmall)
             }
             UpdateCheckerCard()
+            ServerPanel(context)
             AuthPanel(context) {
                 authRevision += 1
                 scope.launch {
@@ -256,6 +257,56 @@ private fun SyncInboxPanel(context: android.content.Context, db: AgroDatabase) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ServerPanel(context: android.content.Context) {
+    var current by remember { mutableStateOf("") }
+    var draft by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        current = withContext(Dispatchers.IO) { ServerConfig.baseUrl(context) }
+    }
+    val configured = current.isNotBlank()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
+        Text("اتصال به سرور همگام‌سازی", fontWeight = FontWeight.Bold)
+        Text(
+            if (configured) "سرور فعال: $current" else "سروری تنظیم نشده است؛ داده‌ها فقط روی همین دستگاه ذخیره می‌شوند.",
+            color = if (configured) Muted else Color(0xFFF0C36D),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        OutlinedTextField(
+            draft,
+            { draft = it },
+            label = { Text("آدرس سرور، مثلاً https://molido.example.com") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                status = if (ServerConfig.save(context, draft)) {
+                    current = ServerConfig.baseUrl(context)
+                    draft = ""
+                    "آدرس سرور ذخیره شد؛ اکنون می‌توانید حساب بسازید یا وارد شوید."
+                } else {
+                    "آدرس معتبر نیست: باید https باشد (یا http فقط برای 127.0.0.1 و localhost)."
+                }
+            }) { Text("ذخیره آدرس") }
+            if (configured) {
+                TextButton(onClick = {
+                    ServerConfig.clear(context)
+                    current = ServerConfig.baseUrl(context)
+                    status = "آدرس ذخیره‌شده پاک شد."
+                }) { Text("پاک کردن") }
+            }
+        }
+        if (status.isNotBlank()) Text(status, color = Muted, style = MaterialTheme.typography.bodySmall)
+        Text(
+            "حساب و همگام‌سازی روی سرور خودتان ذخیره می‌شوند؛ برای راه‌اندازی سرور، مسیر docs/LAN_DEPLOYMENT_AND_RECOVERY.md را ببینید.",
+            color = Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 

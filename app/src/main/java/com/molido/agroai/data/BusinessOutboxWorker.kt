@@ -25,7 +25,7 @@ object BusinessSyncScheduler {
 
 class BusinessOutboxWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        val base = BuildConfig.SYNC_BASE_URL.trim().trimEnd('/')
+        val base = ServerConfig.baseUrl(applicationContext)
         if (base.isBlank()) return Result.success()
         if (!base.startsWith("https://")) return Result.failure()
         val session = SessionStore(applicationContext)

@@ -1,7 +1,6 @@
 package com.molido.agroai.data
 
 import android.content.Context
-import com.molido.agroai.BuildConfig
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -17,8 +16,8 @@ class AuthRepository(context: Context) {
     private suspend fun authenticate(action: String, username: String, password: String) {
         require(username.matches(Regex("[A-Za-z0-9_.-]{3,64}")))
         require(password.length in 12..256)
-        val base = BuildConfig.SYNC_BASE_URL.trim().trimEnd('/')
-        require(base.startsWith("https://")) { "آدرس امن سرور همگام‌سازی تنظیم نشده است." }
+        val base = ServerConfig.baseUrl(appContext)
+        require(base.startsWith("https://") || base.startsWith("http://")) { "سروری تنظیم نشده است؛ آدرس سرور همگام‌سازی را در بخش «اتصال به سرور» وارد کنید." }
         val connection = (URL("$base/v1/auth/$action").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             instanceFollowRedirects = false

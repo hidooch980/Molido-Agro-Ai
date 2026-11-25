@@ -35,7 +35,7 @@ fun SensorMonitoringPage(greenhouses: List<GreenhouseEntity>, token: String?) {
     var loading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("برای مشاهده داده‌های سنسورها، حساب کاربری و سرور را متصل کنید.") }
     val scope = rememberCoroutineScope()
-    val base = BuildConfig.SYNC_BASE_URL.trim().trimEnd('/')
+    val base = ServerConfig.baseUrl(context)
 
     fun refresh() {
         if (token.isNullOrBlank()) { message = "برای مشاهده پایش سنسورها ابتدا وارد حساب شوید."; return }
