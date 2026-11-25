@@ -60,4 +60,12 @@ interface SyncOperationDao {
 
     @Query("SELECT * FROM sync_operations WHERE entityType = :type AND entityId = :entityId AND state = 'CONFLICT' ORDER BY createdAtEpochMillis DESC LIMIT 1")
     suspend fun conflictedForEntity(type: String, entityId: String): SyncOperationEntity?
+
+    /**
+     * Retires a conflicted row once the user picked a side. Leaving it in CONFLICT would make
+     * every later remote change for the same entity look conflicted again, so the device would
+     * stop accepting server updates for that record for good.
+     */
+    @Query("UPDATE sync_operations SET state = 'SUPERSEDED', lastError = :reason WHERE id = :id")
+    suspend fun markSuperseded(id: String, reason: String)
 }

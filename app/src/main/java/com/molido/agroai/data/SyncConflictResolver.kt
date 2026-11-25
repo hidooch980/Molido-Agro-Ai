@@ -11,6 +11,9 @@ class SyncConflictResolver(private val context: Context, private val database: A
         database.withTransaction {
             projector.applyChange(change)
             database.syncInboxDao().setState(change.id, "RESOLVED_SERVER")
+            database.syncOperationDao()
+                .conflictedForEntity(change.entityType, change.entityId)
+                ?.let { database.syncOperationDao().markSuperseded(it.id, "Removed after the server version was accepted") }
         }
     }
 
@@ -34,6 +37,7 @@ class SyncConflictResolver(private val context: Context, private val database: A
                     baseVersion = change.serverVersion
                 )
             )
+            database.syncOperationDao().markSuperseded(old.id, "Re-queued while keeping the device version")
             database.syncInboxDao().setState(change.id, "RESOLVED_LOCAL")
         }
         SyncScheduler.runNow(context)
