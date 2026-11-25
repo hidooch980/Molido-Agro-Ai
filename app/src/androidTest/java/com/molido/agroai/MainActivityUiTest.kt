@@ -40,11 +40,14 @@ class MainActivityUiTest {
     @Test
     fun crmErpSavesEncryptedCustomerLocallyWithoutAccount() {
         composeRule.onNodeWithText("CRM/ERP").performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithText("نام مشتری").performScrollTo().performTextInput("مشتری محلی آزمایشی")
         composeRule.onNodeWithText("ثبت مشتری").performScrollTo().performClick()
-        // The save runs on a background dispatcher and the record list reflows when the row lands,
-        // so poll until the confirmation is both present and on screen instead of racing one frame.
-        composeRule.waitUntil(timeoutMillis = 15_000) {
+        // The save runs on a background dispatcher, the Keystore hands out the AES key on first use
+        // and the record list reflows when the row lands. On a software-rendered emulator that can
+        // take several seconds, so poll for the confirmation with a generous budget instead of
+        // racing one frame.
+        composeRule.waitUntil(timeoutMillis = 30_000) {
             runCatching {
                 composeRule.onNodeWithText("اطلاعات رمزگذاری‌شده فقط روی این دستگاه ذخیره شد", substring = true)
                     .performScrollTo().assertIsDisplayed()
