@@ -136,7 +136,7 @@ fun DiagnosisPanel(context: Context) {
                         advice = null
                         adviceNote = ""
                         status = "انتخاب‌ها پاک شد."
-                    }
+                    },
                     modifier = Modifier.weight(1f)
                 ) { Text("پاک کردن") }
             }
