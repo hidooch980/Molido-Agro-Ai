@@ -11,6 +11,8 @@ pip install -r requirements.txt
 uvicorn app:app --host 127.0.0.1 --port 8080
 ```
 
+Or run the whole service with one command from the repository root: `cp .env.example .env`, fill the two secrets, then `docker compose up -d --build`. The container listens on port 8080 and keeps the database in the `molido-data` volume.
+
 Put the service behind a TLS reverse proxy before exposing it publicly. Do not use the development secret. Back up the SQLite database and protect the host filesystem.
 
 ## API

@@ -448,6 +448,7 @@ private fun AuthPanel(context: android.content.Context, db: AgroDatabase, boundA
     var user by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("در حال بررسی وضعیت حساب…") }
+    var role by remember { mutableStateOf<AccountRole?>(null) }
     LaunchedEffect(session) {
         status = withContext(Dispatchers.IO) {
             when {
@@ -455,6 +456,14 @@ private fun AuthPanel(context: android.content.Context, db: AgroDatabase, boundA
                 session.userId() != null -> "حساب متصل: ${session.userId()}"
                 else -> "برای همگام‌سازی، وارد حساب شوید یا حساب بسازید؛ بدون سرور هم پروفایل محلی ممکن است."
             }
+        }
+        val cached = withContext(Dispatchers.IO) { AccountRole.parse(session.role()) }
+        if (cached != null) role = cached
+        // The role gates approvals on the server; refresh it so the panel never promises more
+        // than the account can do. A failure keeps whatever was cached.
+        if (withContext(Dispatchers.IO) { !session.isLocalProfile() && session.accessToken() != null }) {
+            val remote = withContext(Dispatchers.IO) { runCatching { AuthRepository(context).refreshProfile() }.getOrNull() }
+            if (remote != null) role = remote
         }
     }
     var busy by remember { mutableStateOf(false) }
@@ -575,8 +584,31 @@ private fun AuthPanel(context: android.content.Context, db: AgroDatabase, boundA
                     onAuthChanged()
                 }
             }) { Text("شروع بدون سرور") }
+            role?.let {
+                Text(
+                    "نقش حساب: ${it.label} — " +
+                        if (it.canApproveFinances) {
+                            "اجازه تأییدسندهای مالی را دارد."
+                        } else {
+                            "اجازه تأیید مالی ندارد؛ تأیید سندها را سرپرست یا حسابدار انجام می‌دهد."
+                        },
+                    color = if (it.canApproveFinances) Color(0xFF9BE0B1) else Color(0xFFF0C36D),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             if (session.userId() != null) {
-                TextButton(onClick = { AuthRepository(context).signOut(); status = "از حساب خارج شدید."; onAuthChanged() }) { Text("خروج") }
+                TextButton(enabled = !busy, onClick = {
+                    busy = true
+                    scope.launch {
+                        status = withContext(Dispatchers.IO) {
+                            runCatching { AuthRepository(context).signOut() }
+                                .fold({ "از حساب خارج شدید و توکن روی سرور باطل شد." }, { "خروج محلی انجام شد." })
+                        }
+                        role = null
+                        busy = false
+                        onAuthChanged()
+                    }
+                }) { Text("خروج") }
             }
         }
     }

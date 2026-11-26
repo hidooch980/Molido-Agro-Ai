@@ -15,6 +15,19 @@ class SessionStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("molido_secure_session", Context.MODE_PRIVATE)
     private val alias = "molido.session.aes.v1"
     private val KEY_LOCAL_PROFILE = "local_profile"
+    private val KEY_ROLE = "account_role"
+
+    /**
+     * The role is not a credential, so it is kept in plain preferences; it is cleared with the
+     * session and re-read from `/v1/auth/me` on the next sign-in.
+     */
+    fun saveRole(role: String?) {
+        prefs.edit().apply {
+            if (role.isNullOrBlank()) remove(KEY_ROLE) else putString(KEY_ROLE, role)
+        }.apply()
+    }
+
+    fun role(): String? = prefs.getString(KEY_ROLE, null)
 
     /**
      * Keystore decrypt operations can take seconds on a cold, software-emulated device, so a
@@ -29,7 +42,7 @@ class SessionStore(context: Context) {
         require(token.isNotBlank() && userId.isNotBlank())
         saveSecret("access_token", token)
         saveSecret("user_id", userId)
-        prefs.edit().putBoolean(KEY_LOCAL_PROFILE, false).commit()
+        prefs.edit().putBoolean(KEY_LOCAL_PROFILE, false).remove(KEY_ROLE).commit()
     }
 
     /**
@@ -39,7 +52,7 @@ class SessionStore(context: Context) {
     fun saveLocalProfile(userId: String) {
         require(userId.isNotBlank() && userId.length <= 128)
         saveSecret("user_id", userId)
-        prefs.edit().remove("access_token").putBoolean(KEY_LOCAL_PROFILE, true).commit()
+        prefs.edit().remove("access_token").putBoolean(KEY_LOCAL_PROFILE, true).remove(KEY_ROLE).commit()
         cache().remove("access_token")
     }
 

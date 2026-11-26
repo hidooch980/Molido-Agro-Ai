@@ -1,0 +1,26 @@
+# One-command self-hosted sync API: `docker compose up -d` after copying .env.example to .env.
+# The database lives in a named volume, so recreating the container never loses farm data.
+# An explicit name keeps compose working when the checkout folder has non-ASCII characters.
+name: molido-agro
+services:
+  api:
+    build: ./server
+    image: molido-agro-sync:latest
+    container_name: molido-agro-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MOLIDO_DB_PATH: /data/molido.sqlite3
+    ports:
+      - "${MOLIDO_HTTP_PORT:-8080}:8080"
+    volumes:
+      - molido-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  molido-data:

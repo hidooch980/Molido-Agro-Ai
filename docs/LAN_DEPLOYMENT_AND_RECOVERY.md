@@ -109,6 +109,23 @@ python server/backup_db.py /secure-backups/molido-$(date -u +%Y%m%dT%H%M%SZ).sql
 
 این سند طرح استقرار و معیار پذیرش است، نه گزارش نصب واقعی. hostname، گواهی TLS، secrets عملیاتی، broker، gateway و سنسورهای فیزیکی هنوز در محیط کاربر تنظیم یا آزمایش نشده‌اند.
 
+## استقرار با Docker Compose (پیشنهادی)
+
+ریشه مخزن یک `docker-compose.yml` دارد؛ کل سرور با یک فرمان بالا می‌آید و دیتابیس در volume می‌ماند:
+
+```bash
+cp .env.example .env      # مقادیر را پر کنید؛ دستور تولید دو کلید داخل فایل نوشته شده
+docker compose up -d --build
+docker compose ps         # تا healthy شدن صبر کنید
+curl -fsS http://127.0.0.1:8080/health
+```
+
+- **کلیدها:** `MOLIDO_JWT_SECRET` (امضای توکن، حداقل ۳۲ نویسه) و `MOLIDO_DATA_KEY` (۳۲ بایت base64url بدون padding). اگر `MOLIDO_DATA_KEY` نباشد، صف/داده رمزگذاری‌شده با خطای 503 رد می‌شود؛ اگر کلید عوض شود، داده رمزگذاری‌شده قبلی قابل بازگشایی نیست.
+- **حساب‌ها:** برای ساخت حساب با نقش (`OWNER`/`OPERATOR`/`ACCOUNTANT`) `MOLIDO_ADMIN_TOKEN` را بگذارید و از `POST /v1/admin/accounts` استفاده کنید؛ ثبت‌نام عمومی همیشه نقش `OPERATOR` می‌دهد.
+- **TLS:** اپ فقط `https` (یا `http` برای `127.0.0.1`/`localhost`) می‌پذیرد. جلوی کانتینر یک reverse proxy مانند Caddy بگذارید و `MOLIDO_TRUST_PROXY_HEADERS=1` را فقط همان‌جا فعال کنید.
+- **آدرس در اپ:** در بخش «اتصال به سرور» آدرس را وارد کنید؛ برای شبکه محلی `http://127.0.0.1:8080` روی همان گوشی معنی ندارد، از IP رایانه استفاده کنید و آن را با TLS منتشر کنید.
+- **پشتیبان‌گیری:** `docker run --rm -v molido-agro_molido-data:/data -v "$PWD":/out alpine tar czf /out/molido-data.tgz -C /data .`
+- **ارتقا:** `git pull && docker compose up -d --build` — دیتابیس و کلیدها دست‌نخورده می‌مانند.
 ## پشتیبان‌گیری روی گیت‌هاب (بدون سرور)
 
 برای زمانی که هیچ سروری در دسترس نیست، اپ می‌تواند پشتیبان رمزگذاری‌شده را در یک **ریپوی خصوصی گیت‌هاب** نگه دارد:
