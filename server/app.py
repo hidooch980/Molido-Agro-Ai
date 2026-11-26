@@ -27,6 +27,10 @@ MAX_REQUEST_BYTES = int(os.environ.get("MOLIDO_MAX_REQUEST_BYTES", str(1024 * 10
 ROLES = ("OWNER", "OPERATOR", "ACCOUNTANT")
 APPROVER_ROLES = ("OWNER", "ACCOUNTANT")
 ADMIN_TOKEN = os.environ.get("MOLIDO_ADMIN_TOKEN", "")
+# Self-registration hands out the OWNER role, which is right for a LAN install whose first user
+# owns the farm and wrong for anything reachable from the internet; such a deployment sets this
+# to 0 and creates accounts through the admin API instead.
+ALLOW_REGISTRATION = os.environ.get("MOLIDO_ALLOW_REGISTRATION", "1").strip() == "1"
 METRICS_TOKEN = os.environ.get("MOLIDO_METRICS_TOKEN", "")
 STARTED_AT = time.time()
 METRICS: dict[str, int] = {}
@@ -204,6 +208,8 @@ def enforce_rate_limit(request: Request, bucket: str, limit: int) -> None:
 @app.post("/v1/auth/register")
 def register(body: Credentials, request: Request):
     ensure_auth_configured()
+    if not ALLOW_REGISTRATION:
+        raise HTTPException(403, "Self-registration is disabled; ask an administrator for an account")
     enforce_rate_limit(request, "register", AUTH_RATE_LIMIT)
     salt=secrets.token_bytes(16); uid=secrets.token_hex(16)
     try:

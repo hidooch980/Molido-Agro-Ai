@@ -115,3 +115,22 @@ def test_rate_limits_are_stored_in_the_database_not_in_memory(tmp_path, monkeypa
     with app.db() as connection:
         stored = connection.execute("SELECT COUNT(*) FROM rate_limits").fetchone()[0]
     assert stored >= 1
+
+
+def test_public_registration_can_be_disabled(tmp_path, monkeypatch) -> None:
+    """A deployment that cannot vet new owners must close self-registration entirely."""
+    client = make_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(app, "ALLOW_REGISTRATION", False)
+    response = client.post("/v1/auth/register", json={"username": "closed", "password": PASSWORD})
+    assert response.status_code == 403
+    assert "administrator" in response.json()["detail"]
+    # The admin API still provisions accounts while public sign-up stays closed.
+    monkeypatch.setattr(app, "ADMIN_TOKEN", ADMIN)
+    created = client.post(
+        "/v1/admin/users",
+        json={"username": "created-by-admin", "password": PASSWORD, "role": "OPERATOR"},
+        headers={"X-Admin-Token": ADMIN},
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["role"] == "OPERATOR"
+    assert client.post("/v1/auth/login", json={"username": "created-by-admin", "password": PASSWORD}).status_code == 200
