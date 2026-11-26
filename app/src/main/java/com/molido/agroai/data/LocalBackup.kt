@@ -12,9 +12,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Single-file local snapshot: every Room table is dumped to JSON, the dump is encrypted with the
- * Keystore-backed payload key and wrapped in a small envelope. No server is involved, so the file
- * can be moved to a new device and restored there.
+ * Single-file snapshot: every Room table is dumped to JSON and wrapped in a small envelope.
+ * [export]/[restore] encrypt the dump with the Keystore-backed payload key, so that file is only
+ * readable on the device that produced it (a wiped Keystore makes it unrecoverable, by design).
+ * [exportDump]/[restoreDump] are the plain-text building blocks used by the passphrase-protected
+ * GitHub backup, which is the cross-device path.
  */
 object LocalBackup {
     private const val FORMAT = 1
@@ -22,15 +24,10 @@ object LocalBackup {
     private val SKIPPED_TABLES = setOf("room_master_table", "android_metadata", "sqlite_sequence")
 
     suspend fun export(context: Context, database: AgroDatabase): String = withContext(Dispatchers.IO) {
-        val sqlite = database.openHelper.writableDatabase
-        val dump = JSONArray()
-        for (table in tables(sqlite)) {
-            dump.put(JSONObject().put("table", table).put("rows", dumpTable(sqlite, table)))
-        }
         JSONObject()
             .put("format", FORMAT)
             .put("createdAtEpochMillis", System.currentTimeMillis())
-            .put("payload", SyncPayloadCipher.encrypt(context, dump.toString()))
+            .put("payload", SyncPayloadCipher.encrypt(context, exportDump(database)))
             .toString()
     }
 
@@ -38,8 +35,46 @@ object LocalBackup {
     suspend fun restore(context: Context, database: AgroDatabase, envelope: String): Int = withContext(Dispatchers.IO) {
         val root = JSONObject(envelope)
         require(root.optInt("format") == FORMAT) { "نسخه فایل پشتیبان پشتیبانی نمی‌شود." }
-        val dump = JSONArray(SyncPayloadCipher.decrypt(root.getString("payload")))
+        restoreDump(database, SyncPayloadCipher.decrypt(root.getString("payload")))
+    }
+
+    /** Plain-text table dump. Only for encryption by a passphrase-protected layer. */
+    suspend fun exportDump(database: AgroDatabase): String = withContext(Dispatchers.IO) {
         val sqlite = database.openHelper.writableDatabase
+        val dump = JSONArray()
+        for (table in tables(sqlite)) {
+            dump.put(JSONObject().put("table", table).put("rows", dumpTable(sqlite, table)))
+        }
+        dump.toString()
+    }
+
+    /**
+     * Restores a plain-text dump produced by [exportDump]. The account binding of the receiving
+     * device wins, so importing someone else's snapshot cannot silently rebind this phone.
+     */
+    suspend fun restoreDump(database: AgroDatabase, dumpJson: String): Int = withContext(Dispatchers.IO) {
+        val dump = JSONArray(dumpJson)
+        val sqlite = database.openHelper.writableDatabase
+        val boundAccountBefore = runCatching {
+            sqlite.query("SELECT value FROM app_metadata WHERE key = 'bound_account_id' LIMIT 1").use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        }.getOrNull()
+        var dumpBoundAccount: String? = null
+        for (index in 0 until dump.length()) {
+            val table = dump.getJSONObject(index)
+            if (table.getString("table") != "app_metadata") continue
+            val rows = table.getJSONArray("rows")
+            for (rowIndex in 0 until rows.length()) {
+                val row = rows.getJSONObject(rowIndex)
+                if (row.optString("key") == "bound_account_id") {
+                    dumpBoundAccount = row.optString("value").takeIf { it.isNotBlank() }
+                }
+            }
+        }
+        if (boundAccountBefore != null && dumpBoundAccount != null && boundAccountBefore != dumpBoundAccount) {
+            throw IllegalStateException("این پشتیبان به حساب دیگری تعلق دارد؛ بازیابی روی این دستگاه مجاز نیست.")
+        }
         var restored = 0
         sqlite.beginTransaction()
         try {
@@ -68,6 +103,14 @@ object LocalBackup {
                     sqlite.insert(table, SQLiteDatabase.CONFLICT_REPLACE, values)
                 }
                 restored += rows.length()
+            }
+            // The receiving device keeps its own binding; only a fresh device adopts the dump's.
+            if (boundAccountBefore != null) {
+                sqlite.execSQL("DELETE FROM app_metadata WHERE key = 'bound_account_id'")
+                sqlite.execSQL(
+                    "INSERT INTO app_metadata(key, value) VALUES('bound_account_id', ?)",
+                    arrayOf<Any?>(boundAccountBefore)
+                )
             }
             sqlite.setTransactionSuccessful()
         } finally {

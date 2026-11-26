@@ -129,6 +129,7 @@ private fun AgroApp() {
             } else {
                 SyncInboxPanel(context, db)
                 BackupPanel(context, db)
+                GitHubBackupPanel(db)
                 when (tab) {
                 Tab.HOME -> {
                     HomePage(greenhouses.size, cycles.count { it.status == "ACTIVE" }, activities.size, stock.size, balance, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
@@ -185,6 +186,133 @@ private fun conflictLabel(change: SyncInboxEntity): String {
     return entityTypeLabel(change.entityType) + " • " + (title ?: change.entityId.take(8))
 }
 
+@Composable
+private fun GitHubBackupPanel(db: AgroDatabase) {
+    val scope = rememberCoroutineScope()
+    var repository by remember { mutableStateOf("") }
+    var token by remember { mutableStateOf("") }
+    var passphrase by remember { mutableStateOf("") }
+    var repeated by remember { mutableStateOf("") }
+    var confirmRestore by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var status by remember {
+        mutableStateOf(
+            "پشتیبان با گذرواژه خودتان رمزگذاری و در یک ریپوی خصوصی گیت‌هاب ذخیره می‌شود؛ برای بازیابی روی گوشی دیگر همان گذرواژه لازم است.",
+        )
+    }
+
+    fun problem(): String? = when {
+        !GitHubBackup.isValidRepository(repository) -> "نام ریپو را به شکل owner/repo وارد کنید."
+        !GitHubBackup.isValidToken(token) -> "توکن گیت‌هاب (حداقل ۲۰ نویسه، بدون فاصله) را وارد کنید."
+        passphrase.length < PortableBackupCipher.MIN_PASSPHRASE ->
+            "گذرواژه پشتیبان باید حداقل ${PortableBackupCipher.MIN_PASSPHRASE} نویسه باشد."
+        passphrase != repeated -> "تکرار گذرواژه یکسان نیست."
+        else -> null
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
+        Text("پشتیبان‌گیری روی گیت‌هاب (بدون سرور)", fontWeight = FontWeight.Bold)
+        Text(status, color = Muted, style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(
+            repository,
+            { repository = it },
+            label = { Text("ریپوی خصوصی (owner/repo)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            token,
+            { token = it },
+            label = { Text("توکن گیت‌هاب با دسترسی Contents: Read and write") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            passphrase,
+            { passphrase = it },
+            label = { Text("گذرواژه پشتیبان (حداقل ${PortableBackupCipher.MIN_PASSPHRASE} نویسه)") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            repeated,
+            { repeated = it },
+            label = { Text("تکرار گذرواژه پشتیبان") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(enabled = !busy, onClick = {
+                val issue = problem()
+                if (issue != null) {
+                    status = issue
+                } else {
+                    busy = true
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            runCatching {
+                                val dump = LocalBackup.exportDump(db)
+                                val envelope = PortableBackupCipher.encrypt(dump, passphrase)
+                                GitHubBackup.push(token, repository, GitHubBackup.newFileName(), envelope)
+                            }.getOrElse { GitHubBackup.Outcome(false, it.message ?: "ساخت پشتیبان ناموفق بود.") }
+                        }
+                        status = result.message
+                        busy = false
+                    }
+                }
+            }) { Text(if (busy) "در حال ارسال…" else "ارسال پشتیبان") }
+            OutlinedButton(enabled = !busy, onClick = {
+                val issue = problem()
+                if (issue != null) {
+                    status = issue
+                } else {
+                    confirmRestore = true
+                    status = "بازیابی، داده‌های محلی این دستگاه را با آخرین پشتیبان گیت‌هاب جایگزین می‌کند."
+                }
+            }) { Text("بازیابی از گیت‌هاب") }
+        }
+        if (confirmRestore) {
+            Text(
+                "همه ردیف‌های محلی با آخرین پشتیبان جایگزین می‌شوند؛ اگر داده تازه‌ای روی این دستگاه دارید، اول پشتیبان بگیرید.",
+                color = Color(0xFFFFD180),
+                style = MaterialTheme.typography.bodySmall
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(enabled = !busy, onClick = {
+                    confirmRestore = false
+                    busy = true
+                    scope.launch {
+                        status = withContext(Dispatchers.IO) {
+                            runCatching {
+                                val latest = GitHubBackup.pullLatest(token, repository)
+                                val content = latest.content
+                                if (!latest.ok) {
+                                    latest.message
+                                } else if (content.isNullOrBlank()) {
+                                    latest.message
+                                } else {
+                                    val dump = PortableBackupCipher.decrypt(content, passphrase)
+                                    val rows = LocalBackup.restoreDump(db, dump)
+                                    "بازیابی از ${latest.fileName} انجام شد: $rows ردیف بازگردانی شد."
+                                }
+                            }.getOrElse { it.message ?: "بازیابی ناموفق بود." }
+                        }
+                        busy = false
+                    }
+                }) { Text("تأیید بازیابی") }
+                OutlinedButton(enabled = !busy, onClick = { confirmRestore = false }) { Text("انصراف") }
+            }
+        }
+        Text(
+            "توکن فقط در حافظه همین صفحه نگه داشته می‌شود و ذخیره نمی‌شود. ریپو باید خصوصی باشد؛ فایل ذخیره‌شده رمزگذاری‌شده است.",
+            color = Muted,
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
 @Composable
 private fun BackupPanel(context: android.content.Context, db: AgroDatabase) {
     val scope = rememberCoroutineScope()
