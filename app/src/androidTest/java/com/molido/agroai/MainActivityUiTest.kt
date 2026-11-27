@@ -1,11 +1,8 @@
 package com.molido.agroai
 
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -65,7 +62,7 @@ class MainActivityUiTest {
             "ثبت مشتری نتیجه نداد؛ وضعیت صفحه:" + System.lineSeparator() + composeRule.onRoot().printToString(),
             noticeVisible(saved)
         )
-        composeRule.onNode(hasText(saved, substring = true)).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(saved, substring = true).performScrollTo().assertIsDisplayed()
     }
 
     @Test
