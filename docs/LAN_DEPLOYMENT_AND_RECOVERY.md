@@ -120,7 +120,7 @@ docker compose ps         # تا healthy شدن صبر کنید
 curl -fsS http://127.0.0.1:8080/health
 ```
 
-- **کلیدها:** `MOLIDO_JWT_SECRET` (امضای توکن، حداقل ۳۲ نویسه) و `MOLIDO_DATA_KEY` (۳۲ بایت base64url بدون padding). اگر `MOLIDO_DATA_KEY` نباشد، صف/داده رمزگذاری‌شده با خطای 503 رد می‌شود؛ اگر کلید عوض شود، داده رمزگذاری‌شده قبلی قابل بازگشایی نیست.
+- **کلیدها:** `MOLIDO_JWT_SECRET` (امضای توکن، حداقل ۳۲ نویسه)، `MOLIDO_DATA_KEY` (۳۲ بایت base64url بدون padding) و اختیاری `MOLIDO_BACKUP_KEY` (۳۲ بایت base64url) برای رمزگذاری کپی‌های پشتیبان. اگر `MOLIDO_DATA_KEY` نباشد، صف/داده رمزگذاری‌شده با خطای 503 رد می‌شود؛ اگر کلید عوض شود، داده رمزگذاری‌شده قبلی قابل بازگشایی نیست.
 - **حساب‌ها:** ثبت‌نام عمومی (`POST /v1/auth/register`) به هر کاربری نقش `OWNER` می‌دهد؛ این برای نصب خانگی/شبکه محلی درست است و برای نصب اینترنتی خطرناک. روی هر نصب در دسترس اینترنت `MOLIDO_ALLOW_REGISTRATION=0` بگذارید و حساب‌ها را با `MOLIDO_ADMIN_TOKEN` و `POST /v1/admin/users` (سربرگ `X-Admin-Token`، نقش‌های `OWNER`/`OPERATOR`/`ACCOUNTANT`) بسازید؛ با این تنظیم، ثبت‌نام عمومی با 403 رد می‌شود.
 - **TLS:** اپ فقط `https` (یا `http` برای `127.0.0.1`/`localhost`) می‌پذیرد. جلوی کانتینر یک reverse proxy مانند Caddy بگذارید و `MOLIDO_TRUST_PROXY_HEADERS=1` را فقط همان‌جا فعال کنید.
 - **آدرس در اپ:** در بخش «اتصال به سرور» آدرس را وارد کنید؛ برای شبکه محلی `http://127.0.0.1:8080` روی همان گوشی معنی ندارد، از IP رایانه استفاده کنید و آن را با TLS منتشر کنید.
@@ -128,6 +128,10 @@ curl -fsS http://127.0.0.1:8080/health
 - **بازیابی از کپی (آزموده‌شده روی همین compose):** `docker compose stop api`، سپس کپی را روی volume بنشانید و مالکیت را به کاربر سرویس بدهید:
   `docker run --rm -v molido-agro_molido-backups:/backups -v molido-agro_molido-data:/data alpine sh -c "rm -f /data/molido.sqlite3* && cp /backups/molido-YYYYmmdd-HHMMSS.sqlite3 /data/molido.sqlite3 && chown 10001:10001 /data/molido.sqlite3"`
   بعد `docker compose up -d api` و بررسی `/health` و ورود با حسابی که پیش از کپی وجود داشت. بدون `chown` سرور نمی‌تواند فایل را باز کند، و حذف `molido.sqlite3*` (شامل `-wal`/`-shm`) لازم است، وگرنه wal قدیمی داده ناسازگار می‌سازد. حساب ساخته‌شده بعد از تاریخ کپی پس از بازیابی وجود ندارد (در آزمون واقعی ۴۰۱ شد) و رکوردهای پیش از کپی سالم برمی‌گردند. `MOLIDO_DATA_KEY` را همان قبلی نگه دارید؛ با کلید دیگر، payloadهای رمزگذاری‌شده باز نمی‌شوند.
+- **کپی رمزگذاری‌شده:** اگر `MOLIDO_BACKUP_KEY` (۳۲ بایت base64url) تنظیم شود، هر کپی به‌جای دیتابیس خوانا با نام `molido-YYYYmmdd-HHMMSS.sqlite3.enc` نوشته می‌شود: هدر `MOLIDOBK1`، nonce دوازده‌بایتی و سپس AES-GCM؛ فایل ساده حذف می‌شود. کپی شامل نام کاربری و هش گذرواژه است، پس بدون کلید هم نباید در دسترس دیگران باشد. کلید نامعتبر یا با طول اشتباه پیش از نوشتن کپی با خطای 503 رد می‌شود و هیچ فایلی جا نمی‌گذارد.
+- **بازیابی از کپی رمزگذاری‌شده (آزموده‌شده محلی):** `docker compose stop api`، سپس با همان ایمیج و همان کلید بازگردانی کنید (اسکریپت داخل ایمیج است و کلید را از محیط می‌خواند):
+  `docker run --rm -v molido-agro_molido-backups:/backups -v molido-agro_molido-data:/data --env-file .env molido-agro-sync:latest python restore_backup.py /backups/molido-YYYYmmdd-HHMMSS.sqlite3.enc /data/molido.sqlite3`
+  اسکریپت خودش `molido.sqlite3*` را حذف نمی‌کند؛ پیش از آن `-wal`/`-shm` را پاک کنید. فایل را با کاربر سرویس (uid 10001) می‌نویسد، پس `chown` لازم نیست. کلید نادرست با پیام `wrong MOLIDO_BACKUP_KEY or damaged copy` و کد خروج ۱ رد می‌شود. بعد `docker compose up -d api` و بررسی `/health` و ورود با حساب پیش از کپی.
 - **بررسی سلامت کپی‌ها:** `docker compose exec api ls -lh /backups` و در صورت نیاز دانلود با `docker compose cp api:/backups/<file> .`.
 - **ارتقا:** `git pull && docker compose up -d --build` — دیتابیس و کلیدها دست‌نخورده می‌مانند.
 ## پشتیبان‌گیری روی گیت‌هاب (بدون سرور)

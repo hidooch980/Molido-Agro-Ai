@@ -10,7 +10,7 @@
 | دوره کشت | ثبت و نمایش اولیه موجود؛ اعتبارسنجی دامنه‌ای بیشتر لازم |
 | عملیات کشاورزی | ثبت و نمایش اولیه موجود؛ اتصال به دوره کشت ناقص |
 | انبار | ثبت و نمایش اولیه موجود؛ گردش ورود/خروج و ویرایش ناقص |
-| مالی | ثبت درآمد/هزینه و تراز اولیه؛ گزارش و کنترل دسترسی ناقص |
+| مالی | ثبت درآمد/هزینه و تراز اولیه؛ اکنون صفحه «تأیید اسناد مالی» در اپ نیز هست: فهرست PENDING_APPROVAL، تأیید با توکن تأیید و نقش درست، و تراز اسناد ثبت‌شده از /v1/erp/reports/financial |
 | کاتالوگ محصولات خوراکی | فهرست اولیه موجود؛ پوشش همه محصولات هنوز کامل نیست |
 | اعتبارسنجی اندازه‌گیری‌ها | منطق و تست واحد اولیه موجود |
 | سنسور دما/رطوبت | ثبت قرائت، تاریخچه، آستانه و وضعیت سمت سرور؛ صفحه Android وضعیت، نمودار ۴۸ قرائت اخیر و **ثبت قرائت دستی** (منبع MANUAL با idempotency) فعال است؛ ورودی فارسی/عربی-هندی و جداکننده اعشار «٫» پذیرفته و بازه‌ها اعتبارسنجی می‌شوند (۵ آزمون واحد) |
@@ -20,18 +20,18 @@
 | همگام‌سازی شبکه‌ای | Worker و API خودمیزبان، احراز هویت، push دسته‌ای (تا ۵۰ عملیات با سقف بایت)، اعمال pull در Room (پنج نوع کشاورزی + رکوردهای عمومی CRM/ERP)، ذخیره serverVersion در inbox و حل تعارض انتخابی؛ کارت تعارض اکنون برچسب خوانا (نام رکورد) دارد و ردیف متعارض پس از تصمیم بازنشسته می‌شود؛ تعویض حساب با پاک‌سازی کنترل‌شده پیاده شد (پیش‌نمایش تعداد عملیات همگام‌نشده، تأیید دومرحله‌ای، لغو workerها، پاک‌سازی ردیف‌ها و آزادسازی اتصال دستگاه) |
 | ثبت‌نام و آدرس سرور | اپ به‌طور پیش‌فرض هیچ سروری ندارد؛ پیش‌تر ثبت‌نام همیشه با «آدرس سرور تنظیم نشده است» شکست می‌خورد. اکنون پنل «اتصال به سرور» آدرس را اعتبارسنجی (https، یا http فقط برای loopback) و ذخیره می‌کند و ثبت‌نام/ورود، workerهای همگام‌سازی و صفحه سنسورها از همان آدرس استفاده می‌کنند؛ بدون سرور، داده‌ها محلی می‌مانند و دکمه «شروع بدون سرور» یک پروفایل محلی بدون توکن می‌سازد (workerها با توکن null بی‌کار می‌مانند)
 | احراز هویت و جداسازی چندکاربره | API حساب‌محور و توکن رمزگذاری‌شده؛ خروج/ابطال و چرخش توکن؛ قفل حساب و محدودیت نرخ؛ نقش‌های OWNER/OPERATOR/ACCOUNTANT با API مدیریت حساب (MOLIDO_ADMIN_TOKEN) و گیت نقش روی تأییدهای مالی؛ ثبت‌نام عمومی به‌صورت پیش‌فرض نقش OWNER می‌دهد و با MOLIDO_ALLOW_REGISTRATION=0 کامل بسته می‌شود (ساخت حساب فقط با admin API)؛ تعویض حساب در اپ ممکن است (با پاک‌سازی کامل داده محلی و تأیید صریح)؛ اپ نقش حساب را از `/v1/auth/me` می‌خواند و اجازه/عدم اجازه تأیید مالی را نشان می‌دهد؛ خروج از حساب توکن را روی سرور باطل می‌کند؛ مالکیت per-row و چند حساب هم‌زمان روی یک دستگاه پشتیبانی نمی‌شود |
-| سخت‌سازی و پایش سرور | لاگ دسترسی JSON، قفل ورود با Retry-After، محدودیت نرخ per-IP (ذخیره در جدول rate_limits تا بین چند worker مشترک باشد) با پشتیبانی اختیاری X-Forwarded-For، سقف اندازه بدنه (413)، ابطال توکن و endpoint /metrics با شمارنده‌ها و گیت اختیاری توکن؛ کپی خودکار زمان‌بندی‌شده دیتابیس با SQLite online backup، چرخش نسخه‌ها (پیش‌فرض ۱۴) و کپی فوری با `/v1/admin/backup` |
+| سخت‌سازی و پایش سرور | لاگ دسترسی JSON، قفل ورود با Retry-After، محدودیت نرخ per-IP (ذخیره در جدول rate_limits تا بین چند worker مشترک باشد) با پشتیبانی اختیاری X-Forwarded-For، سقف اندازه بدنه (413)، ابطال توکن و endpoint /metrics با شمارنده‌ها و گیت اختیاری توکن؛ کپی خودکار زمان‌بندی‌شده دیتابیس با SQLite online backup، چرخش نسخه‌ها (پیش‌فرض ۱۴) و کپی فوری با `/v1/admin/backup` |؛ اگر MOLIDO_BACKUP_KEY تنظیم شود هر کپی به‌صورت پوشش AES-GCM نوشته می‌شود (molido-*.sqlite3.enc) و بازگرداندن آن با restore_backup.py در ابزار خدمات انجام می‌شود
 | پل صف آفلاین به CRM/ERP | مشتری، تأمین‌کننده و محصولِ ارسال‌شده با /v1/sync/push در business_parties و business_products آینه می‌شوند و در APIهای CRM/ERP دیده می‌شوند؛ SKU تکراری push را خراب نمی‌کند؛ سایر موجودیت‌ها همچنان فقط در انبار رکورد عمومی هستند |
 | رمزگذاری | AES-GCM برای نشست، payload صف/سرور و فایل پشتیبان؛ **دیتابیس‌های محلی تازه با SQLCipher رمزگذاری می‌شوند** (کلید ۳۲ بایتی تصادفی، پیچیده‌شده با کلید Keystore). دیتابیس‌های قدیمیِ plaintext به‌صورت خودکار و ایمن تبدیل می‌شوند: ردیف‌ها به یک کپی رمزگذاری‌شده منتقل، با `PRAGMA integrity_check` و شمارش ردیف هر جدول بررسی، و تنها پس از موفقیت جای‌گزینی می‌شوند؛ فایل اصلی به‌عنوان `<name>.plaintext-backup` نگه داشته می‌شود و هر خطا نسخه اصلی را دست‌نخورده باقی می‌گذارد (پنج آزمون ابزارداری رمزگذاری/مهاجرت) |
 | پشتیبان‌گیری | snapshot JSON از همه جدول‌های Room با دو مسیر: فایل محلی با کلید Keystore (فقط همان دستگاه) و **پشتیبان روی ریپوی خصوصی گیت‌هاب** با گذرواژه کاربر (PBKDF2-HMAC-SHA256 + AES-256-GCM، قابل بازیابی روی گوشی دیگر)؛ بازیابی تراکنشی، حفظ اتصال حساب دستگاه گیرنده و ۸ آزمون واحد رمزنگاری/اعتبارسنجی؛ آزمون ارتقای نسخه با فایل واقعی باقی است |
 | Schema دیتابیس | `exportSchema=true` و `app/schemas/.../7.json` کامیت شده تا تغییر جدول بدون migration در بازبینی دیده شود |
-| CameraX و ثبت تصویر | وابستگی‌ها موجود؛ گردش‌کار محصولی پیاده‌سازی نشده |
+| CameraX و ثبت تصویر | دوربین درون‌برنامه‌ای با LifecycleCameraController در پنل تشخیص فعال است: اجازه دوربین درخواستی، عکس در حافظه خصوصی اپ ذخیره و پیش‌نمایش می‌شود؛ بدون اجازه یا بدون دوربین بقیه پنل کار می‌کند؛ آزمون روی دستگاه واقعی باقی است |
 | تشخیص بیماری/آفت | **ارزیابی قاعده‌محور نشانه‌ها فعال است** (۶ بیماری، ۴ محصول): نشانه‌ها روی بوته انتخاب می‌شوند، الگوی کامل الزامی هر بیماری با آستانه اطمینان ۰٫۷۰ تطبیق داده می‌شود، ترکیب مبهم رد و به کارشناس ارجاع می‌شود و توصیه محلی کاتالوگ نمایش داده می‌شود؛ اگر سرور در دسترس باشد توصیه IPM و هشدار اقلیمی از `/v1/ai/diagnose/disease` هم گرفته می‌شود (۶ آزمون واحد) |
 | مدل یادگیری ماشین/بینایی | پیاده‌سازی نشده؛ بدون مدل آموزش‌دیده و داده برچسب‌دار، تشخیص تصویری ارائه نمی‌شود |
 | سرویس AI ابری | سمت سرور موجود است؛ کلاینت آن را فقط به‌عنوان تکمیل‌کننده ارزیابی محلی صدا می‌زند |
 | به‌روزرسانی APK | پایه بررسی manifest و دانلود وجود دارد؛ نیازمند تست شبکه/نصب واقعی |
 | APK امضاشده CI | برای اجرای 44685744976، apksigner موفق و گواهی با SHA-256 ثبت‌شده؛ این artifact مربوط به Commit 53eb94ce است، نه تغییرات بعدی؛ تست نصب واقعی باقی است |
-| تست واحد | ۱۱۴ آزمون سرور (شامل ابطال/چرخش توکن، قفل ورود، محدودیت نرخ، نقش‌ها، متریک‌ها، سقف بدنه و پل صف به CRM/ERP) محلی موفق؛ CI ابری سبز و ۱۳ آزمون ابزارداری Android (شامل تعارض، پشتیبان‌گیری و آدرس سرور) روی امولاتور موفق |
+| تست واحد | ۱۲۹ آزمون سرور با پوشش ابطال/چرخش توکن، قفل ورود، محدودیت نرخ، نقش‌ها، متریک‌ها، سقف بدنه، پل صف و مسیرهای بازیابی (تغییر/بازنشانی گذرواژه، صف تأیید، کپی رمزنگاری‌شده) محلی موفق؛ CI ابری سبز و ۱۳ آزمون ابزارداری Android روی امولاتور موفق |
 | تست UI و دستگاه واقعی | انجام نشده |
 
 ## وضعیت همگام‌سازی
@@ -48,12 +48,12 @@
 ## CRM + ERP (شاخه feature/crm-erp-foundation)
 | قابلیت | وضعیت واقعی |
 |---|---|
-| CRM مشتریان | API ایجاد/فهرست، احراز هویت و جداسازی حساب اضافه شده؛ رابط Android و فعالیت‌ها/فرصت‌ها/پیگیری هنوز نیست |
+| CRM مشتریان | API ایجاد/فهرست حساب‌محور؛ اکنون تب CRM/ERP در اپ سرنخ‌ها را می‌سازد، مرحله را تغییر می‌دهد و فعالیت می‌ثبت کند؛ فرصت‌ها/تیکت‌ها و مشتری در اپ هنوز فرم ندارد |
 | تأمین‌کنندگان | API ایجاد/فهرست حساب‌محور اضافه شده |
 | کاتالوگ محصولات | API ایجاد/فهرست با SKU یکتا در هر حساب اضافه شده |
 | انبار | رسید، حواله و تعدیل با idempotency و جلوگیری از موجودی منفی اضافه شده؛ رزرو، بچ/لات و انبارگردانی کامل باقی است |
 | سفارش فروش و خرید | ایجاد سفارش DRAFT و اعتبارسنجی ارتباطات حسابی و محاسبه جمع خطوط اضافه شده؛ تأیید، تحویل، دریافت و چرخه کامل وضعیت باقی است |
-| مالی | ثبت سند PENDING_APPROVAL اضافه شده؛ دفترکل، تأیید، تسویه، مالیات و گزارش حسابداری پیاده‌سازی نشده‌اند |
+| مالی | ثبت سند PENDING_APPROVAL و دفترکل سمت سرور اضافه شده؛ صف تأیید و گزارش تراز در اپ نیز هست؛ تسویه در اپ، مالیات و گزارش حسابداری کامل باقی است |
 | گزارش مدیریتی | شمارنده‌های اولیه CRM/ERP اضافه شده |
 | اتصال تولید گلخانه به سفارش/انبار/هزینه | هنوز پیاده‌سازی نشده |
 | Android/Room و outbox برای CRM/ERP | هنوز پیاده‌سازی نشده |
@@ -67,7 +67,7 @@
 | CRM | Customer/supplier foundation, lead pipeline stages, activities/follow-up timestamps, support tickets/status | Full search/edit/delete, role permissions, complete customer lifecycle |
 | Orders | Draft sales/purchase orders; confirm/fulfil/cancel state machine; sales stock reservation and fulfil consumption; purchase fulfil receipt | Multi-warehouse selection, concurrency stress, full returns/refunds and approvals |
 | Finance | Chart-of-accounts seed, balanced double-entry journal validation, pending approval, server-side approval token, posted-only report | RBAC/two-person approval, decimal-safe accounting, Iran statutory rules, tax, bank reconciliation |
-| Harvest | API records harvest batches linked to synchronized greenhouse/crop-cycle records and increases stock | Android harvest form/API integration, batch/lot traceability and cost-of-production |
+| Harvest | API records harvest batches linked to synchronized greenhouse/crop-cycle records and increases stock; the Android CRM/ERP tab now posts a harvest with an idempotency key and reports the result | Batch/lot traceability and cost-of-production |
 | Settlement | Records partial settlements and prevents amount above order total | Reconciliation, automatic ledger posting, refunds and idempotency |
 | Sync | Authenticated encrypted batch push (≤50 ops / 500 KB per request) and cursor pull; every entity type is projected into Room (farm tables or `business_records`); conflicts are parked as `CONFLICT`/`PENDING_REVIEW` instead of being dropped | Conflict review UI, replay/clock-skew stress tests, multi-device acceptance |
 | Security/concurrency/recovery | Account scoping and write locks added to key inventory/order/ledger paths; tests added for account isolation, approval gate and concurrent sales reservation oversell prevention | Full penetration/security review, parallel load test, backup/restore with expanded schema, real LAN and phone acceptance |
@@ -87,4 +87,18 @@ This expansion is source-code work under review. It is not a deployed or product
 | اعتماد TLS در اندروید | network_security_config.xml: نسخه release فقط CA سیستمی و بدون cleartext؛ نسخه debug می‌تواند CA نصب‌شده کاربر را برای LAN بپذیرد | بازبینی پیکربندی؛ آزمون روی دستگاه لازم است |
 
 هنوز باز است: اعمال pull در Room، ذخیره نسخه سرور هر رکورد، ارسال دسته‌ای عملیات، بازیابی حساب، نقش‌ها و آزمون دستگاه واقعی.
+
+
+## این دور: تکمیل مسیرهای باقی‌مانده (0.8.0)
+
+| تغییر | جزئیات | تأیید |
+|---|---|---|
+| صف تأیید دفترکل در اپ | GET /v1/erp/ledger/journals با فیلتر وضعیت و خطوط مخدوش‌شده؛ پنل LedgerPanel فهرست، تأیید با X-Approval-Token و تراز /v1/erp/reports/financial را نشان می‌دهد | server/test_recovery_paths.py (صف و تأیید) + دریل محلی HTTP |
+| تغییر و بازنشانی گذرواژه | POST /v1/auth/password (با گذرواژه فعلی، پاک کردن قفل) و POST /v1/admin/users/{username}/password برای حساب قفل‌شده؛ فرم تغییر گذرواژه در AuthPanel | server/test_recovery_paths.py (۵ آزمون) + دریل محلی |
+| کپی رمزنگاری‌شده | MOLIDO_BACKUP_KEY کپی را به صورت molido-*.sqlite3.enc می‌نویسد؛ کلید نامعتبر پیش از نوشتن رد می‌شود؛ restore_backup.py با کلید درست بازگردانی می‌کند | server/test_recovery_paths.py + دریل محلی (بازگردانی، ورود حساب، رد حساب پس از کپی) |
+| حذف کد مرده | server/advanced_business_api.py که هرگز register نمی‌شد حذف شد؛ endpoint مورد نیاز در ماژول زنده اضافه شد | مجموعه آزمون سرور |
+| تصویر شاهد تشخیص | دوربین CameraX در پنل تشخیص؛ فایل در حافظه خصوصی اپ می‌ماند و بارگذاری نمی‌شود | کامپایل CI؛ آزمون دستگاه واقعی باقی |
+| CRM و برداشت در اپ | CrmPanel: ثبت سرنخ، تغییر مرحله، فعالیت و ثبت برداشت با کلید idempotency | کامپایل CI؛ آزمون UI باقی |
+
+همچنان باقی: مدل تصویری آموزش‌دیده، گیت‌وی سخت‌افزاری واقعی، نصب/ارتقا روی گوشی واقعی، چند حساب هم‌زمان روی یک دستگاه، نسخه پایدار 1.0.0، گزارش حسابداری کامل و هشدارسازی متریک‌ها.
 

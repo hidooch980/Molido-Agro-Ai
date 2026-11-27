@@ -15,14 +15,28 @@ Or run the whole service with one command from the repository root: `cp .env.exa
 
 Set `MOLIDO_BACKUP_DIR` to have the service copy the database on a schedule (`MOLIDO_BACKUP_INTERVAL_SECONDS`, keeping `MOLIDO_BACKUP_KEEP` copies) and call `POST /v1/admin/backup` with `X-Admin-Token` for an on-demand copy before an upgrade.
 
+Set `MOLIDO_BACKUP_KEY` (32 bytes, base64url) when copies must not be readable at rest: each copy
+is then written as `molido-*.sqlite3.enc`, an AES-GCM envelope around the same database, and the
+plaintext is removed. A copy contains usernames and password hashes, so a leaked backup directory
+is a leaked credential list. Restore one with the service image, which holds the key:
+
+```sh
+docker compose run --rm api python restore_backup.py /backups/molido-YYYYmmdd-HHMMSS.sqlite3.enc /data/restored.sqlite3
+```
+
+Keep the key with the same care as `MOLIDO_DATA_KEY`: without it the copies cannot be opened.
+
 Put the service behind a TLS reverse proxy before exposing it publicly. Do not use the development secret. Back up the SQLite database and protect the host filesystem.
 
 ## API
 - `POST /v1/auth/register`, `POST /v1/auth/login`: returns bearer token and userId.
 - `POST /v1/auth/refresh`: rotates the token; the old token is revoked immediately.
 - `POST /v1/auth/logout`: revokes the presented token.
+- `POST /v1/auth/password`: changes your own password (current password required) and clears any lockout.
 - `GET /v1/auth/me`: returns the account name and its role (`OWNER`, `OPERATOR`, `ACCOUNTANT`).
 - `GET /v1/admin/users`, `POST /v1/admin/users`, `PATCH /v1/admin/users/{username}`: account management, enabled only when `MOLIDO_ADMIN_TOKEN` is set (sent as `X-Admin-Token`).
+- `POST /v1/admin/users/{username}/password`: resets a forgotten password; hashes cannot be reversed, so this is the only recovery path.
+- `GET /v1/erp/ledger/journals?status=PENDING_APPROVAL`: the approval queue; `POST /v1/erp/ledger/journals/{id}/approve` confirms one entry with `X-Approval-Token` and an approver role.
 - `GET /metrics`: counters and database gauges; returns `401` when `MOLIDO_METRICS_TOKEN` is set and the bearer token does not match.
 - `POST /v1/sync/push`: idempotent batch (max 100 operations), optimistic `baseVersion` check.
 - `POST /v1/sync/pull`: changes scoped to the authenticated account.

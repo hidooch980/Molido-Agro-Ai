@@ -37,6 +37,10 @@ ALLOW_REGISTRATION = os.environ.get("MOLIDO_ALLOW_REGISTRATION", "1").strip() ==
 BACKUP_DIR = os.environ.get("MOLIDO_BACKUP_DIR", "")
 BACKUP_INTERVAL = int(os.environ.get("MOLIDO_BACKUP_INTERVAL_SECONDS", str(24 * 60 * 60)))
 BACKUP_KEEP = int(os.environ.get("MOLIDO_BACKUP_KEEP", "14"))
+# A copy is a whole database: usernames and password hashes sit in it in clear text. When a key is
+# configured every copy is written as an AES-GCM envelope and the plaintext is removed, so a leaked
+# backup directory no longer leaks credentials.
+BACKUP_KEY = os.environ.get("MOLIDO_BACKUP_KEY", "")
 METRICS_TOKEN = os.environ.get("MOLIDO_METRICS_TOKEN", "")
 STARTED_AT = time.time()
 METRICS: dict[str, int] = {}
@@ -117,6 +121,41 @@ def init_db():
             c.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'OWNER'")
 init_db()
 
+BACKUP_SUFFIX = ".sqlite3"
+ENCRYPTED_SUFFIX = ".sqlite3.enc"
+BACKUP_MAGIC = b"MOLIDOBK1"
+
+def backup_key() -> bytes:
+    """Decode MOLIDO_BACKUP_KEY; a wrong length must fail loudly instead of writing a weak copy."""
+    raw = BACKUP_KEY.strip()
+    try: key = base64.urlsafe_b64decode(raw + "=" * ((4 - len(raw) % 4) % 4))
+    except Exception: key = b""
+    if len(key) != 32:
+        raise HTTPException(503, "Backup encryption key must be 32 bytes, base64url encoded")
+    return key
+
+def seal_backup(path: Path) -> Path:
+    """Replace a plaintext copy with an AES-GCM envelope and unlink the plaintext."""
+    key = backup_key()
+    nonce = secrets.token_bytes(12)
+    envelope = BACKUP_MAGIC + nonce + AESGCM(key).encrypt(nonce, path.read_bytes(), None)
+    sealed = path.with_name(path.name[: -len(BACKUP_SUFFIX)] + ENCRYPTED_SUFFIX)
+    sealed.write_bytes(envelope)
+    path.unlink()
+    return sealed
+
+def open_backup(path: Path, destination: Path) -> Path:
+    """Materialise a readable database from a copy, decrypting an envelope when needed."""
+    blob = Path(path).read_bytes()
+    if blob.startswith(BACKUP_MAGIC):
+        plain = AESGCM(backup_key()).decrypt(blob[len(BACKUP_MAGIC):len(BACKUP_MAGIC) + 12],
+                                             blob[len(BACKUP_MAGIC) + 12:], None)
+    else:
+        plain = blob
+    target = Path(destination)
+    target.write_bytes(plain)
+    return target
+
 def backup_database(stamp: float | None = None) -> Path:
     """Copy the live database with SQLite's online backup API and drop old copies.
 
@@ -125,6 +164,9 @@ def backup_database(stamp: float | None = None) -> Path:
     """
     if not BACKUP_DIR:
         raise HTTPException(503, "Backups are not configured")
+    if BACKUP_KEY:
+        # Validate the key before writing anything, so a typo cannot leave a plaintext copy behind.
+        backup_key()
     directory = Path(BACKUP_DIR)
     moment = time.strftime("%Y%m%d-%H%M%S", time.gmtime(time.time() if stamp is None else stamp))
     target = directory / f"molido-{moment}.sqlite3"
@@ -142,6 +184,8 @@ def backup_database(stamp: float | None = None) -> Path:
     except (OSError, sqlite3.Error) as error:
         # Usually a mounted directory owned by another user; say so instead of a stack trace.
         raise HTTPException(503, f"Backup directory is not writable: {target.parent}") from error
+    if BACKUP_KEY:
+        target = seal_backup(target)
     rotate_backups(directory)
     metric("backup_created")
     return target
@@ -150,7 +194,7 @@ def rotate_backups(directory: Path) -> None:
     """Keep the newest BACKUP_KEEP copies so an unattended server cannot fill its disk."""
     if BACKUP_KEEP <= 0:
         return
-    copies = sorted(directory.glob("molido-*.sqlite3"))
+    copies = sorted(directory.glob("molido-*.sqlite3*"))
     for stale in copies[:-BACKUP_KEEP] if len(copies) > BACKUP_KEEP else []:
         try:
             stale.unlink()
@@ -345,6 +389,30 @@ def logout(authorization: str | None = Header(default=None)):
     metric("auth_logout")
     return {"revoked": revoke_token(decode_token(authorization))}
 
+class PasswordChange(BaseModel):
+    currentPassword: str = Field(min_length=12, max_length=256)
+    newPassword: str = Field(min_length=12, max_length=256)
+
+@app.post("/v1/auth/password")
+def change_password(body: PasswordChange, request: Request, authorization: str | None = Header(default=None)):
+    """Let a signed-in user replace a forgotten or shared password without losing the account."""
+    ensure_auth_configured()
+    enforce_rate_limit(request, "password", AUTH_RATE_LIMIT)
+    uid = current_user(authorization)
+    with db() as c:
+        row = c.execute("SELECT username,salt,password_hash FROM users WHERE id=?", (uid,)).fetchone()
+        if row is None: raise HTTPException(401, "Account no longer exists")
+        if not hmac.compare_digest(password_hash(body.currentPassword, row["salt"]), row["password_hash"]):
+            metric("password_change_failed")
+            raise HTTPException(403, "Current password is incorrect")
+        salt = secrets.token_bytes(16)
+        c.execute("UPDATE users SET salt=?, password_hash=? WHERE id=?",
+                  (salt, password_hash(body.newPassword, salt), uid))
+        # A successful reset also clears the lockout, or the old failures keep the door shut.
+        c.execute("DELETE FROM login_failures WHERE username=?", (row["username"],))
+    metric("password_changed")
+    return {"changed": True, "username": row["username"]}
+
 @app.get("/v1/auth/me")
 def me(authorization: str | None = Header(default=None)):
     """Describe the signed-in account, including the role that gates approvals."""
@@ -390,6 +458,22 @@ def admin_set_role(username: str, body: RoleUpdate, x_admin_token: str | None = 
     if not changed: raise HTTPException(404, "Account not found")
     metric("admin_role_changed")
     return {"username": username, "role": body.role}
+
+class PasswordReset(BaseModel):
+    newPassword: str = Field(min_length=12, max_length=256)
+
+@app.post("/v1/admin/users/{username}/password")
+def admin_reset_password(username: str, body: PasswordReset, x_admin_token: str | None = Header(default=None)):
+    """Recover a locked-out account: passwords are hashed, so the old one cannot be handed back."""
+    require_admin(x_admin_token)
+    salt = secrets.token_bytes(16)
+    with db() as c:
+        changed = c.execute("UPDATE users SET salt=?, password_hash=? WHERE username=?",
+                            (salt, password_hash(body.newPassword, salt), username)).rowcount
+        c.execute("DELETE FROM login_failures WHERE username=?", (username,))
+    if not changed: raise HTTPException(404, "Account not found")
+    metric("admin_password_reset")
+    return {"username": username, "reset": True}
 
 @app.post("/v1/admin/backup")
 def admin_backup(x_admin_token: str | None = Header(default=None)):

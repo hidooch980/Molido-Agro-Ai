@@ -99,6 +99,8 @@ private fun AgroApp() {
         accessToken = withContext(Dispatchers.IO) { SessionStore(context).accessToken() }
     }
     var notice by remember { mutableStateOf("ذخیره‌سازی محلی فعال است؛ برای ثبت اطلاعات نیازی به اینترنت نیست.") }
+    // Hoisted from the account panel: the ledger screen must know whether this account may approve.
+    var accountRole by remember { mutableStateOf<AccountRole?>(null) }
 
     Scaffold(containerColor = Forest, bottomBar = {
         NavigationBar(containerColor = Panel) {
@@ -115,7 +117,7 @@ private fun AgroApp() {
             }
             UpdateCheckerCard()
             ServerPanel(context)
-            AuthPanel(context, db, boundAccount) {
+            AuthPanel(context, db, boundAccount, onRoleChanged = { accountRole = it }) {
                 authRevision += 1
                 scope.launch {
                     currentUser = withContext(Dispatchers.IO) { SessionStore(context).userId() }
@@ -148,7 +150,8 @@ private fun AgroApp() {
                 Tab.STOCK -> StockPage(stock, onSave = { n, cat, q, u, min ->
                     scope.launch { try { val id = UUID.randomUUID().toString(); val item = InventoryItemEntity(id, n.trim(), cat, q, u, min); val payload = JSONObject().put("id", id).put("name", item.name).put("category", cat).put("quantity", q).put("unit", u).put("minimumQuantity", min).put("updatedAtEpochMillis", item.updatedAtEpochMillis).toString(); db.insertAndEnqueue(context, "inventory_item", id, payload) { db.inventoryDao().insert(item) }; notice = "قلم انبار ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "نام قلم انبار باید یکتا باشد." } }
                 }, onUpdate = { item -> scope.launch { try { val payload = JSONObject().put("id", item.id).put("name", item.name).put("category", item.category).put("quantity", item.quantity).put("unit", item.unit).put("minimumQuantity", item.minimumQuantity).put("updatedAtEpochMillis", item.updatedAtEpochMillis).toString(); db.updateAndEnqueue(context, "inventory_item", item.id, payload) { db.inventoryDao().upsert(item) }; notice = "قلم انبار ویرایش شد." } catch (_: Exception) { notice = "ویرایش قلم انبار ناموفق بود." } } }, onDelete = { id -> scope.launch { db.deleteAndEnqueue(context, "inventory_item", id) { db.inventoryDao().deleteById(id) }; notice = "قلم انبار حذف شد." } })
-                Tab.BUSINESS -> CrmErpPage(currentUser, businessRecords, onLegacySave = { type, title, description, amount ->
+                Tab.BUSINESS -> {
+                CrmErpPage(currentUser, businessRecords, onLegacySave = { type, title, description, amount ->
                     scope.launch { try {
                         val id = UUID.randomUUID().toString()
                         val now = System.currentTimeMillis()
@@ -160,9 +163,14 @@ private fun AgroApp() {
                         notice = "رکورد ذخیره شد و در صف همگام‌سازی قرار گرفت."
                     } catch (_: Exception) { notice = "ذخیره رکورد ناموفق بود؛ اطلاعات را بررسی کنید." } }
                 }, onNotice = { notice = it })
-                Tab.MONEY -> FinancePage(finance, balance, onSave = { type, cat, amount, desc ->
+                CrmPanel(context, greenhouses, cycles)
+                }
+                Tab.MONEY -> {
+                FinancePage(finance, balance, onSave = { type, cat, amount, desc ->
                     scope.launch { try { val id = UUID.randomUUID().toString(); val item = FinancialEntryEntity(id, null, type, cat, amount, description = desc); val payload = JSONObject().put("id", id).put("type", type).put("category", cat).put("amount", amount).put("currency", item.currency).put("occurredAtEpochMillis", item.occurredAtEpochMillis).put("description", desc).toString(); db.insertAndEnqueue(context, "financial_entry", id, payload) { db.financeDao().insert(item) }; notice = "سند مالی ثبت شد؛ تغییر در صف همگام‌سازی محلی قرار گرفت." } catch (_: Exception) { notice = "ثبت سند مالی ناموفق بود." } }
                 }, onUpdate = { item -> scope.launch { try { val payload = JSONObject().put("id", item.id).put("greenhouseId", item.greenhouseId).put("type", item.type).put("category", item.category).put("amount", item.amount).put("currency", item.currency).put("occurredAtEpochMillis", item.occurredAtEpochMillis).put("description", item.description).toString(); db.updateAndEnqueue(context, "financial_entry", item.id, payload) { db.financeDao().upsert(item) }; notice = "سند مالی ویرایش شد." } catch (_: Exception) { notice = "ویرایش سند مالی ناموفق بود." } } }, onDelete = { id -> scope.launch { db.deleteAndEnqueue(context, "financial_entry", id) { db.financeDao().deleteById(id) }; notice = "سند مالی حذف شد." } })
+                LedgerPanel(context, accountRole)
+                }
                 }
             }
         }
@@ -442,11 +450,20 @@ private fun ServerPanel(context: android.content.Context) {
 }
 
 @Composable
-private fun AuthPanel(context: android.content.Context, db: AgroDatabase, boundAccount: String?, onAuthChanged: () -> Unit) {
+private fun AuthPanel(
+    context: android.content.Context,
+    db: AgroDatabase,
+    boundAccount: String?,
+    onRoleChanged: (AccountRole?) -> Unit,
+    onAuthChanged: () -> Unit,
+) {
     val scope = rememberCoroutineScope()
     val session = remember(context) { SessionStore(context) }
     var user by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var currentPassword by remember { mutableStateOf("") }
+    var nextPassword by remember { mutableStateOf("") }
+    var passwordStatus by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("در حال بررسی وضعیت حساب…") }
     var role by remember { mutableStateOf<AccountRole?>(null) }
     LaunchedEffect(session) {
@@ -465,6 +482,7 @@ private fun AuthPanel(context: android.content.Context, db: AgroDatabase, boundA
             val remote = withContext(Dispatchers.IO) { runCatching { AuthRepository(context).refreshProfile() }.getOrNull() }
             if (remote != null) role = remote
         }
+        onRoleChanged(role)
     }
     var busy by remember { mutableStateOf(false) }
     var switchPreview by remember { mutableStateOf<AccountSwitch.Preview?>(null) }
@@ -597,6 +615,35 @@ private fun AuthPanel(context: android.content.Context, db: AgroDatabase, boundA
                 )
             }
             if (session.userId() != null) {
+                Text("تغییر گذرواژه", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                OutlinedTextField(currentPassword, { currentPassword = it }, label = { Text("گذرواژه فعلی") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(nextPassword, { nextPassword = it }, label = { Text("گذرواژه جدید (حداقل ۱۲ نویسه)") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                OutlinedButton(enabled = !busy, onClick = {
+                    when {
+                        nextPassword.length !in 12..256 -> passwordStatus = "گذرواژه جدید باید بین ۱۲ و ۲۵۶ نویسه باشد."
+                        nextPassword == currentPassword -> passwordStatus = "گذرواژه جدید با گذرواژه فعلی یکسان است."
+                        else -> {
+                            busy = true
+                            scope.launch {
+                                passwordStatus = withContext(Dispatchers.IO) {
+                                    runCatching { AuthRepository(context).changePassword(currentPassword, nextPassword) }
+                                        .fold(
+                                            { "گذرواژه تغییر کرد؛ از این پس با گذرواژه جدید وارد شوید." },
+                                            { it.message ?: "تغییر گذرواژه ناموفق بود." },
+                                        )
+                                }
+                                currentPassword = ""
+                                nextPassword = ""
+                                busy = false
+                            }
+                        }
+                    }
+                }) { Text("ذخیره گذرواژه جدید") }
+                if (passwordStatus.isNotBlank()) {
+                    Text(passwordStatus, color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (session.userId() != null) {
                 TextButton(enabled = !busy, onClick = {
                     busy = true
                     scope.launch {
@@ -605,6 +652,7 @@ private fun AuthPanel(context: android.content.Context, db: AgroDatabase, boundA
                                 .fold({ "از حساب خارج شدید و توکن روی سرور باطل شد." }, { "خروج محلی انجام شد." })
                         }
                         role = null
+                        onRoleChanged(null)
                         busy = false
                         onAuthChanged()
                     }

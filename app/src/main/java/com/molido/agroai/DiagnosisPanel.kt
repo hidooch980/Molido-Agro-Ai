@@ -50,6 +50,7 @@ fun DiagnosisPanel(context: Context, greenhouses: List<GreenhouseEntity> = empty
     var advice by remember { mutableStateOf<DiseaseDiagnosisApi.Advice?>(null) }
     var adviceNote by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var photoName by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     Card(
@@ -64,6 +65,10 @@ fun DiagnosisPanel(context: Context, greenhouses: List<GreenhouseEntity> = empty
                 style = MaterialTheme.typography.bodySmall,
                 color = DiagnosisMuted
             )
+            PhotoCapture { photoName = it.name }
+            photoName?.let {
+                Text("شاهد تصویری ثبت‌شده: $it", color = DiagnosisMuted, style = MaterialTheme.typography.bodySmall)
+            }
             Text("محصول", color = DiagnosisMuted, style = MaterialTheme.typography.bodySmall)
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (code in DiagnosisCrops) {

@@ -40,6 +40,23 @@ class AuthRepository(context: Context) {
         role
     }
 
+    /**
+     * Replace the password of the signed-in account. The server verifies the current one and
+     * clears any lockout, so a forgotten password no longer means a lost account.
+     */
+    suspend fun changePassword(currentPassword: String, newPassword: String) = withContext(Dispatchers.IO) {
+        require(newPassword.length in 12..256) { "گذرواژه جدید باید بین ۱۲ و ۲۵۶ نویسه باشد." }
+        val token = session.accessToken()
+            ?: throw IllegalStateException("برای تغییر گذرواژه باید وارد حساب شده باشید.")
+        val base = ServerConfig.baseUrl(appContext)
+        require(base.startsWith("http")) { "سرور همگام‌سازی تنظیم نشده است." }
+        val body = JSONObject()
+            .put("currentPassword", currentPassword)
+            .put("newPassword", newPassword)
+            .toString()
+        send("POST", "$base/v1/auth/password", token, body)
+    }
+
     private suspend fun authenticate(action: String, username: String, password: String) {
         require(username.matches(Regex("[A-Za-z0-9_.-]{3,64}")))
         require(password.length in 12..256)

@@ -59,6 +59,31 @@ def register_approval_ledger_routes(app, db, current_user, encrypt_payload, decr
             rows = c.execute("SELECT account_code,name,account_type FROM approval_ledger_accounts WHERE user_id=? AND active=1 ORDER BY account_code", (uid,)).fetchall()
         return {"items": [{"code": r["account_code"], "name": r["name"], "type": r["account_type"]} for r in rows]}
 
+    @app.get("/v1/erp/ledger/journals")
+    def list_journals(status: str | None = None, limit: int = 100,
+                      authorization: str | None = Header(default=None)):
+        """The approval queue: an approver cannot confirm a posting it cannot see."""
+        uid = current_user(authorization)
+        limit = max(1, min(limit, 200))
+        if status is not None and status not in ("PENDING_APPROVAL", "POSTED"):
+            raise HTTPException(422, "Unknown journal status")
+        sql = ("SELECT journal_id,reference,description,currency,total_debit,status,payload,created_at "
+               "FROM approval_ledger_journals WHERE user_id=?")
+        args = [uid]
+        if status:
+            sql += " AND status=?"
+            args.append(status)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        with db() as c:
+            setup(c, uid)
+            rows = c.execute(sql, args).fetchall()
+        return {"items": [{"id": r["journal_id"], "reference": r["reference"],
+                           "description": r["description"], "currency": r["currency"],
+                           "totalDebit": r["total_debit"], "status": r["status"],
+                           "lines": decrypt_payload(r["payload"]).get("lines", []),
+                           "createdAtEpochMillis": r["created_at"]} for r in rows]}
+
     @app.post("/v1/erp/ledger/journals")
     def create_approval_journal(body: ApprovalJournalInput, authorization: str | None = Header(default=None)):
         uid = current_user(authorization)
