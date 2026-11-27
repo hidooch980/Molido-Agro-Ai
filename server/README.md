@@ -75,10 +75,12 @@ Every request writes one JSON access-log line to stdout: `ts`, `event`, `method`
 ```sh
 python -m pytest server -q
 ```
-`server/conftest.py` raises the abuse limits for the suite (a single test client would otherwise trip them); `test_auth_hardening.py`, `test_roles_and_metrics.py` and `test_request_guards.py` exercise the real limits, roles and request guards by patching them per test.
+`server/conftest.py` raises the abuse limits for the suite (a single test client would otherwise trip them); `test_auth_hardening.py`, `test_roles_and_metrics.py` and `test_request_guards.py` exercise the real limits, roles and request guards by patching them per test. `test_recovery_paths.py` covers the recovery paths: self-service and admin password changes, the ledger approval queue, and sealed backup copies (write, reopen, wrong key, rotation, mis-sized key).
 
 ## Current limits
-This is an initial single-node API, not a hardened public multi-tenant deployment. Account recovery, admin roles, a complete write-audit trail, a shared multi-worker rate limiter, TLS, database backup/restore drills and operational monitoring are still required before production.
+This is an initial single-node API, not a hardened public multi-tenant deployment.
+Account recovery (self-service change plus admin reset), admin roles, encrypted scheduled copies with a tested restore path, and a JSON access log now exist.
+Still required before production: a complete write-audit trail, TLS termination with a real certificate, multi-worker rate limiting on a shared store other than SQLite, operational monitoring/alerting, and a restore drill on the real deployment host.
 
 ## Container deployment
 
