@@ -124,7 +124,9 @@ curl -fsS http://127.0.0.1:8080/health
 - **حساب‌ها:** ثبت‌نام عمومی (`POST /v1/auth/register`) به هر کاربری نقش `OWNER` می‌دهد؛ این برای نصب خانگی/شبکه محلی درست است و برای نصب اینترنتی خطرناک. روی هر نصب در دسترس اینترنت `MOLIDO_ALLOW_REGISTRATION=0` بگذارید و حساب‌ها را با `MOLIDO_ADMIN_TOKEN` و `POST /v1/admin/users` (سربرگ `X-Admin-Token`، نقش‌های `OWNER`/`OPERATOR`/`ACCOUNTANT`) بسازید؛ با این تنظیم، ثبت‌نام عمومی با 403 رد می‌شود.
 - **TLS:** اپ فقط `https` (یا `http` برای `127.0.0.1`/`localhost`) می‌پذیرد. جلوی کانتینر یک reverse proxy مانند Caddy بگذارید و `MOLIDO_TRUST_PROXY_HEADERS=1` را فقط همان‌جا فعال کنید.
 - **آدرس در اپ:** در بخش «اتصال به سرور» آدرس را وارد کنید؛ برای شبکه محلی `http://127.0.0.1:8080` روی همان گوشی معنی ندارد، از IP رایانه استفاده کنید و آن را با TLS منتشر کنید.
-- **پشتیبان‌گیری:** `docker run --rm -v molido-agro_molido-data:/data -v "$PWD":/out alpine tar czf /out/molido-data.tgz -C /data .`
+- **پشتیبان‌گیری خودکار:** سرور هر `MOLIDO_BACKUP_INTERVAL_SECONDS` (پیش‌فرض ۲۴ ساعت) با SQLite online backup یک کپی سازگار می‌سازد، فقط `MOLIDO_BACKUP_KEEP` نسخه آخر (پیش‌فرض ۱۴) را نگه می‌دارد و بقیه را پاک می‌کند؛ compose پوشه `/backups` را در volume `molido-backups` نگه می‌دارد. برای کپی فوری (مثلاً پیش از ارتقا): `curl -X POST -H "X-Admin-Token: …" https://<host>/v1/admin/backup`.
+- **بازیابی از کپی:** `docker compose stop api`، سپس کپی را روی volume بنشانید (`docker compose cp molido-YYYYmmdd-HHMMSS.sqlite3 api:/data/molido.sqlite3`) و `docker compose up -d`. `MOLIDO_DATA_KEY` را همان قبلی نگه دارید؛ با کلید دیگر، payloadهای رمزشده باز نمی‌شوند.
+- **بررسی سلامت کپی‌ها:** `docker compose exec api ls -lh /backups` و در صورت نیاز دانلود با `docker compose cp api:/backups/<file> .`.
 - **ارتقا:** `git pull && docker compose up -d --build` — دیتابیس و کلیدها دست‌نخورده می‌مانند.
 ## پشتیبان‌گیری روی گیت‌هاب (بدون سرور)
 

@@ -11,10 +11,12 @@ services:
     env_file: .env
     environment:
       MOLIDO_DB_PATH: /data/molido.sqlite3
+      MOLIDO_BACKUP_DIR: /backups
     ports:
       - "${MOLIDO_HTTP_PORT:-8080}:8080"
     volumes:
       - molido-data:/data
+      - molido-backups:/backups
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
       interval: 30s
@@ -24,3 +26,4 @@ services:
 
 volumes:
   molido-data:
+  molido-backups:

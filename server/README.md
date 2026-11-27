@@ -13,6 +13,8 @@ uvicorn app:app --host 127.0.0.1 --port 8080
 
 Or run the whole service with one command from the repository root: `cp .env.example .env`, fill the two secrets, then `docker compose up -d --build`. The container listens on port 8080 and keeps the database in the `molido-data` volume.
 
+Set `MOLIDO_BACKUP_DIR` to have the service copy the database on a schedule (`MOLIDO_BACKUP_INTERVAL_SECONDS`, keeping `MOLIDO_BACKUP_KEEP` copies) and call `POST /v1/admin/backup` with `X-Admin-Token` for an on-demand copy before an upgrade.
+
 Put the service behind a TLS reverse proxy before exposing it publicly. Do not use the development secret. Back up the SQLite database and protect the host filesystem.
 
 ## API

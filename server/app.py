@@ -1,5 +1,6 @@
 from __future__ import annotations
 import base64, hashlib, hmac, json, os, secrets, sqlite3, threading, time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -31,6 +32,11 @@ ADMIN_TOKEN = os.environ.get("MOLIDO_ADMIN_TOKEN", "")
 # owns the farm and wrong for anything reachable from the internet; such a deployment sets this
 # to 0 and creates accounts through the admin API instead.
 ALLOW_REGISTRATION = os.environ.get("MOLIDO_ALLOW_REGISTRATION", "1").strip() == "1"
+# Scheduled SQLite copies are the only protection against a lost volume or a bad migration; they
+# stay off until a directory is configured so a local test run never writes files.
+BACKUP_DIR = os.environ.get("MOLIDO_BACKUP_DIR", "")
+BACKUP_INTERVAL = int(os.environ.get("MOLIDO_BACKUP_INTERVAL_SECONDS", str(24 * 60 * 60)))
+BACKUP_KEEP = int(os.environ.get("MOLIDO_BACKUP_KEEP", "14"))
 METRICS_TOKEN = os.environ.get("MOLIDO_METRICS_TOKEN", "")
 STARTED_AT = time.time()
 METRICS: dict[str, int] = {}
@@ -56,7 +62,13 @@ def decrypt_payload(value: str) -> dict[str, Any]:
     raw = base64.urlsafe_b64decode(value + "=" * ((4 - len(value) % 4) % 4))
     plain = AESGCM(data_key()).decrypt(raw[:12], raw[12:], None)
     return json.loads(plain)
-app = FastAPI(title="Molido Agro Sync API", version="1.0.0")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Defined further down; resolved when the server actually starts, not at import time.
+    start_backup_thread()
+    yield
+
+app = FastAPI(title="Molido Agro Sync API", version="1.0.0", lifespan=_lifespan)
 
 def db():
     conn = sqlite3.connect(DB_PATH)
@@ -104,6 +116,66 @@ def init_db():
         if "role" not in user_columns:
             c.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'OWNER'")
 init_db()
+
+def backup_database(stamp: float | None = None) -> Path:
+    """Copy the live database with SQLite's online backup API and drop old copies.
+
+    Copying the file itself would race with writers, so the connection-level backup is used: it
+    takes a consistent snapshot while other requests keep serving.
+    """
+    if not BACKUP_DIR:
+        raise HTTPException(503, "Backups are not configured")
+    directory = Path(BACKUP_DIR)
+    moment = time.strftime("%Y%m%d-%H%M%S", time.gmtime(time.time() if stamp is None else stamp))
+    target = directory / f"molido-{moment}.sqlite3"
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        source = sqlite3.connect(DB_PATH)
+        try:
+            destination = sqlite3.connect(target)
+            try:
+                source.backup(destination)
+            finally:
+                destination.close()
+        finally:
+            source.close()
+    except (OSError, sqlite3.Error) as error:
+        # Usually a mounted directory owned by another user; say so instead of a stack trace.
+        raise HTTPException(503, f"Backup directory is not writable: {target.parent}") from error
+    rotate_backups(directory)
+    metric("backup_created")
+    return target
+
+def rotate_backups(directory: Path) -> None:
+    """Keep the newest BACKUP_KEEP copies so an unattended server cannot fill its disk."""
+    if BACKUP_KEEP <= 0:
+        return
+    copies = sorted(directory.glob("molido-*.sqlite3"))
+    for stale in copies[:-BACKUP_KEEP] if len(copies) > BACKUP_KEEP else []:
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+
+def backup_loop() -> None:
+    while True:
+        time.sleep(max(1, BACKUP_INTERVAL))
+        try:
+            backup_database()
+        except Exception:
+            # A failed backup must never take the API down; the next tick retries.
+            pass
+
+_BACKUP_THREAD: threading.Thread | None = None
+
+def start_backup_thread() -> None:
+    global _BACKUP_THREAD
+    if not BACKUP_DIR or BACKUP_INTERVAL <= 0:
+        return
+    if _BACKUP_THREAD is not None and _BACKUP_THREAD.is_alive():
+        return
+    _BACKUP_THREAD = threading.Thread(target=backup_loop, name="molido-backup", daemon=True)
+    _BACKUP_THREAD.start()
 
 def b64(data: bytes) -> str: return base64.urlsafe_b64encode(data).decode().rstrip("=")
 def password_hash(password: str, salt: bytes) -> bytes: return hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
@@ -318,6 +390,13 @@ def admin_set_role(username: str, body: RoleUpdate, x_admin_token: str | None = 
     if not changed: raise HTTPException(404, "Account not found")
     metric("admin_role_changed")
     return {"username": username, "role": body.role}
+
+@app.post("/v1/admin/backup")
+def admin_backup(x_admin_token: str | None = Header(default=None)):
+    """Take an on-demand consistent copy, e.g. before an upgrade, and report where it went."""
+    require_admin(x_admin_token)
+    path = backup_database()
+    return {"file": path.name, "bytes": path.stat().st_size}
 
 @app.get("/metrics")
 def metrics_snapshot(authorization: str | None = Header(default=None)):

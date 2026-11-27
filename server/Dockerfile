@@ -2,7 +2,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 MOLIDO_DB_PATH=/data/molido.sqlite3
 WORKDIR /srv/molido
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && useradd --system --uid 10001 molido && mkdir -p /data && chown -R molido:molido /data /srv/molido
+RUN pip install --no-cache-dir -r requirements.txt && useradd --system --uid 10001 molido && mkdir -p /data /backups && chown -R molido:molido /data /backups /srv/molido
 # Every runtime module lives next to app.py; tests and tooling are excluded by .dockerignore.
 COPY *.py ./
 USER molido
