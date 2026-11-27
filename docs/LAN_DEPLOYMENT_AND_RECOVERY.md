@@ -125,7 +125,9 @@ curl -fsS http://127.0.0.1:8080/health
 - **TLS:** اپ فقط `https` (یا `http` برای `127.0.0.1`/`localhost`) می‌پذیرد. جلوی کانتینر یک reverse proxy مانند Caddy بگذارید و `MOLIDO_TRUST_PROXY_HEADERS=1` را فقط همان‌جا فعال کنید.
 - **آدرس در اپ:** در بخش «اتصال به سرور» آدرس را وارد کنید؛ برای شبکه محلی `http://127.0.0.1:8080` روی همان گوشی معنی ندارد، از IP رایانه استفاده کنید و آن را با TLS منتشر کنید.
 - **پشتیبان‌گیری خودکار:** سرور هر `MOLIDO_BACKUP_INTERVAL_SECONDS` (پیش‌فرض ۲۴ ساعت) با SQLite online backup یک کپی سازگار می‌سازد، فقط `MOLIDO_BACKUP_KEEP` نسخه آخر (پیش‌فرض ۱۴) را نگه می‌دارد و بقیه را پاک می‌کند؛ compose پوشه `/backups` را در volume `molido-backups` نگه می‌دارد. برای کپی فوری (مثلاً پیش از ارتقا): `curl -X POST -H "X-Admin-Token: …" https://<host>/v1/admin/backup`.
-- **بازیابی از کپی:** `docker compose stop api`، سپس کپی را روی volume بنشانید (`docker compose cp molido-YYYYmmdd-HHMMSS.sqlite3 api:/data/molido.sqlite3`) و `docker compose up -d`. `MOLIDO_DATA_KEY` را همان قبلی نگه دارید؛ با کلید دیگر، payloadهای رمزشده باز نمی‌شوند.
+- **بازیابی از کپی (آزموده‌شده روی همین compose):** `docker compose stop api`، سپس کپی را روی volume بنشانید و مالکیت را به کاربر سرویس بدهید:
+  `docker run --rm -v molido-agro_molido-backups:/backups -v molido-agro_molido-data:/data alpine sh -c "rm -f /data/molido.sqlite3* && cp /backups/molido-YYYYmmdd-HHMMSS.sqlite3 /data/molido.sqlite3 && chown 10001:10001 /data/molido.sqlite3"`
+  بعد `docker compose up -d api` و بررسی `/health` و ورود با حسابی که پیش از کپی وجود داشت. بدون `chown` سرور نمی‌تواند فایل را باز کند، و حذف `molido.sqlite3*` (شامل `-wal`/`-shm`) لازم است، وگرنه wal قدیمی داده ناسازگار می‌سازد. حساب ساخته‌شده بعد از تاریخ کپی پس از بازیابی وجود ندارد (در آزمون واقعی ۴۰۱ شد) و رکوردهای پیش از کپی سالم برمی‌گردند. `MOLIDO_DATA_KEY` را همان قبلی نگه دارید؛ با کلید دیگر، payloadهای رمزگذاری‌شده باز نمی‌شوند.
 - **بررسی سلامت کپی‌ها:** `docker compose exec api ls -lh /backups` و در صورت نیاز دانلود با `docker compose cp api:/backups/<file> .`.
 - **ارتقا:** `git pull && docker compose up -d --build` — دیتابیس و کلیدها دست‌نخورده می‌مانند.
 ## پشتیبان‌گیری روی گیت‌هاب (بدون سرور)
